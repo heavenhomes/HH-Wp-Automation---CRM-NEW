@@ -1,0 +1,351 @@
+import dbConnect, { isDbConnected } from '@/lib/mongodb';
+import Lead from '@/lib/models/Lead';
+import SiteVisit from '@/lib/models/SiteVisit';
+import Property from '@/lib/models/Property';
+import { logActivity } from '@/lib/activity/log';
+import { verifySessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
+import { NextResponse } from 'next/server';
+
+const ALLOWED_LEAD_FIELDS = [
+  'phone', 'phoneNumber', 'email', 'name', 'city', 'area',
+  'leadType', 'preferredLanguage', 'propertyCategory', 'purchaseType',
+  'propertyType', 'propertySubType', 'configuration', 'budgetRange',
+  'rentBudgetLabel', 'rentTypeLabel', 'timeline', 'furnishing',
+  'investmentType', 'siteVisit', 'spaceSize',
+  'interested', 'ownedPropertyDraft', 'listingDraft',
+  'step', 'cityAttempts', 'areaAttempts',
+  'matchedProperties', 'currentPropertyIndex',
+  'source',
+  'currentStatus',
+  'assignedTo',
+  'notes',
+];
+
+function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export async function GET(request) {
+  try {
+    if (!isDbConnected()) {
+      const conn = await dbConnect();
+      if (!conn) return NextResponse.json({ error: 'DB unavailable' }, { status: 503 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const limit = Math.min(200, Math.max(1, parseInt(searchParams.get('limit') || '50', 10)));
+    const skip = (page - 1) * limit;
+    const status = searchParams.get('status');
+    const currentStatus = searchParams.get('currentStatus');
+    const leadType = searchParams.get('leadType');
+    const city = searchParams.get('city');
+    const propertyType = searchParams.get('propertyType');
+
+    // ---- Determine caller role ----
+    const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+    const session = verifySessionToken(token);
+    const isOwner = session?.role === 'owner';
+
+    const query = {};
+
+    // Channel partners only see leads assigned to them
+    if (!isOwner && session?.name) {
+      query.assignedTo = {
+        $regex: `^\\s*${escapeRegex(session.name.trim())}\\s*$`,
+        $options: 'i',
+      };
+    }
+
+    if (status === 'completed') query.step = 'completed';
+    else if (status === 'active') query.step = { $ne: 'completed' };
+    if (currentStatus) query.currentStatus = currentStatus;  
+    if (leadType) query.leadType = leadType;
+    if (city) query.city = { $regex: escapeRegex(city), $options: 'i' };
+    if (propertyType) query.propertyType = { $regex: escapeRegex(propertyType), $options: 'i' };
+
+    const [leads, total] = await Promise.all([
+      Lead.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate('matchedProperties', 'propertyId title city area price configuration imageUrl images status')
+        .populate('interested', 'propertyId title city area price configuration imageUrl images status')
+        .populate('ownedPropertyDraft', 'propertyId title city area price configuration imageUrl status images'),
+      Lead.countDocuments(query),
+    ]);
+
+    const transformedLeads = leads.map((lead) => ({
+      _id: lead._id,
+      name: lead.name || 'Not provided',
+      phone: lead.phone,
+      phoneNumber: lead.phoneNumber || lead.phone,
+      email: lead.email || null,
+      leadType: lead.leadType,
+      preferredLanguage: lead.preferredLanguage || 'en',
+      city: lead.city || 'Not provided',
+      area: lead.area || 'Not provided',
+      propertyCategory: lead.propertyCategory || 'Not provided',
+      purchaseType: lead.purchaseType || 'Not provided',
+      propertyType: lead.propertyType || 'Not provided',
+      propertySubType: lead.propertySubType || null,
+      configuration: lead.configuration || 'Not provided',
+      budgetRange: lead.budgetRange || 'Not provided',
+      rentBudgetLabel: lead.rentBudgetLabel || null,
+      rentTypeLabel: lead.rentTypeLabel || null,
+      ...(lead.leadType === 'lister' || lead.propertyCategory === 'rent_out'
+        ? { timeline: lead.timeline || null }
+        : {}),
+      furnishing: lead.furnishing || 'Not provided',
+      investmentType: lead.investmentType || 'Not provided',
+      siteVisit: lead.siteVisit || null,
+      spaceSize: lead.spaceSize || null,
+      notes: lead.notes || '',
+      step: lead.step,
+      isCompleted: lead.step === 'completed',
+      source: lead.source || 'whatsapp_bot',
+      interested: lead.interested || null,
+      matchedProperties: lead.matchedProperties || [],
+      ownedPropertyDraft: lead.ownedPropertyDraft || null,
+      listingDraft: lead.listingDraft || {},
+      currentPropertyIndex: lead.currentPropertyIndex || 0,
+      followUpStatus: lead.followUpStatus,
+      followUpCount: lead.followUpCount,
+      lastActivityAt: lead.lastActivityAt,
+      currentStatus: lead.currentStatus || 'new',
+      assignedTo: lead.assignedTo || '',
+      createdAt: lead.createdAt,
+      updatedAt: lead.updatedAt,
+    }));
+
+    return NextResponse.json({
+      success: true,
+      data: transformedLeads,
+      pagination: { total, page, limit, pages: Math.ceil(total / limit) },
+    });
+  } catch (error) {
+    console.error('Error in GET /api/leads:', error);
+    return NextResponse.json({ error: 'Failed to fetch leads', message: error.message }, { status: 500 });
+  }
+}
+
+export async function POST(request) {
+  try {
+    if (!isDbConnected()) {
+      const conn = await dbConnect();
+      if (!conn) return NextResponse.json({ error: 'DB unavailable' }, { status: 503 });
+    }
+
+    const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+    const session = verifySessionToken(token);
+    if (!session || !['owner', 'channel_partner'].includes(session.role)) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+    const isOwner = session.role === 'owner';
+
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object' }, { status: 400 });
+    }
+
+    if (!isOwner && body.source !== 'manual') {
+      return NextResponse.json(
+        { error: 'Channel partners can only create manual leads' },
+        { status: 403 }
+      );
+    }
+
+    const phone = String(body.phone || '').trim();
+    if (!phone) {
+      return NextResponse.json({ error: 'Phone number is required' }, { status: 400 });
+    }
+
+    const cleanBody = {};
+    for (const key of ALLOWED_LEAD_FIELDS) {
+      if (key !== 'phone' && body[key] !== undefined) cleanBody[key] = body[key];
+    }
+    if (!isOwner) {
+      if (!session.name) {
+        return NextResponse.json({ error: 'Channel partner name is missing from session' }, { status: 403 });
+      }
+      cleanBody.source = 'manual';
+      cleanBody.assignedTo = session.name;
+    } else if (cleanBody.assignedTo !== undefined) {
+      cleanBody.assignedTo = String(cleanBody.assignedTo).trim();
+    }
+    if (!cleanBody.interested) delete cleanBody.interested;
+    if (body.source === 'manual') {
+      const category = cleanBody.propertyCategory;
+      const purchaseType = cleanBody.purchaseType;
+      const categoryIsValid = ['purchase', 'rent_lease', 'rent_out'].includes(category);
+      const expectedSuffix = category === 'purchase' ? '_buy' : '_rent';
+      if (
+        !categoryIsValid ||
+        !['residential_buy', 'commercial_buy', 'residential_rent', 'commercial_rent'].includes(purchaseType) ||
+        !purchaseType.endsWith(expectedSuffix)
+      ) {
+        return NextResponse.json(
+          { error: 'Select a valid property category and residential/commercial type' },
+          { status: 400 }
+        );
+      }
+
+      const isCommercial = purchaseType.startsWith('commercial_');
+      cleanBody.leadType = category === 'rent_out' ? 'lister' : 'seeker';
+      cleanBody.propertyType = isCommercial
+        ? 'commercial'
+        : purchaseType.endsWith('_rent')
+          ? 'rent'
+          : 'buy';
+      cleanBody.rentTypeLabel = purchaseType.endsWith('_rent')
+        ? (isCommercial ? 'Commercial' : 'Residential')
+        : '';
+      cleanBody.city = 'Surat';
+      if (cleanBody.leadType !== 'lister') delete cleanBody.timeline;
+    }
+    if (body.source === 'manual' && body.step === undefined) {
+      cleanBody.step = 'completed';
+    }
+    if (
+      body.source === 'manual' &&
+      body.siteVisit !== undefined &&
+      body.siteVisit !== null &&
+      body.siteVisit !== '' &&
+      typeof body.siteVisit !== 'string'
+    ) {
+      return NextResponse.json({ error: 'Site visit date must be a string' }, { status: 400 });
+    }
+    const siteVisitInput =
+      body.source === 'manual' && typeof body.siteVisit === 'string'
+        ? body.siteVisit.trim()
+        : '';
+    const manualSiteVisitDate = siteVisitInput ? new Date(siteVisitInput) : null;
+    if (manualSiteVisitDate && Number.isNaN(manualSiteVisitDate.getTime())) {
+      return NextResponse.json({ error: 'Invalid site visit date' }, { status: 400 });
+    }
+
+    const existingLead = await Lead.findOne({ phone }).select('_id assignedTo').lean();
+    if (!isOwner && existingLead && existingLead.assignedTo !== session.name) {
+      return NextResponse.json(
+        { error: 'A lead with this phone number already exists and is not assigned to you' },
+        { status: 409 }
+      );
+    }
+    const update = {
+      $set: cleanBody,
+      $setOnInsert: { phone },
+      ...(body.source === 'manual' && cleanBody.leadType !== 'lister'
+        ? { $unset: { timeline: 1 } }
+        : {}),
+    };
+
+    if (body.source === 'manual' && cleanBody.propertyCategory) {
+      const purpose = cleanBody.leadType === 'lister'
+        ? 'Rent Out'
+        : cleanBody.propertyCategory === 'rent_lease'
+          ? 'Rent'
+          : 'Buy';
+      const categoryLabel = cleanBody.propertyType === 'commercial' ? 'Commercial' : 'Residential';
+      const subtypeLabel = cleanBody.propertySubType
+        ? cleanBody.propertySubType.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+        : '';
+      const configurationLabel = cleanBody.configuration
+        ? cleanBody.configuration.toUpperCase().replace('BHK', ' BHK').trim()
+        : '';
+
+      update.$push = {
+        enquiries: {
+          submittedAt: new Date(),
+          city: cleanBody.city || 'Surat',
+          area: cleanBody.area || '',
+          purpose,
+          propertyCategory: categoryLabel,
+          propertyType: subtypeLabel,
+          configuration: cleanBody.configuration === 'commercial' ? 'Commercial' : configurationLabel,
+          size: cleanBody.spaceSize || '',
+          budgetRange: cleanBody.budgetRange || '',
+          budgetLabel: cleanBody.rentBudgetLabel || cleanBody.budgetRange || '',
+          ...(cleanBody.leadType === 'lister'
+            ? { timeline: cleanBody.timeline || '' }
+            : {}),
+          buyingPlan: cleanBody.investmentType || '',
+          furnishing: cleanBody.furnishing || '',
+          spaceSize: cleanBody.spaceSize || '',
+          source: 'manual',
+        },
+      };
+    }
+
+    const lead = await Lead.findOneAndUpdate(
+      { phone },
+      update,
+      { returnDocument: 'after', upsert: true, runValidators: true, setDefaultsOnInsert: true }
+    );
+
+    if (manualSiteVisitDate) {
+      const property = lead.interested
+        ? await Property.findById(lead.interested).lean()
+        : null;
+      const scheduledDate = manualSiteVisitDate;
+      const visitDateKey = scheduledDate.toISOString();
+
+      await SiteVisit.findOneAndUpdate(
+        {
+          lead: lead._id,
+          source: 'admin',
+          rawPreferredDateTime: visitDateKey,
+        },
+        {
+          $set: {
+            property: property?._id || null,
+            leadName: lead.name || '',
+            leadPhone: lead.phone || '',
+            propertyTitle: property?.title || property?.internalName || 'Property not specified',
+            propertyCode: property?.propertyId || '',
+            scheduledDate,
+            scheduledTime: '',
+            rawPreferredDateTime: visitDateKey,
+            channelPartnerName: lead.assignedTo || '',
+            status: 'scheduled',
+          },
+          $setOnInsert: {
+            lead: lead._id,
+            source: 'admin',
+          },
+        },
+        { upsert: true, new: true, runValidators: true }
+      );
+    }
+
+    const isNew = !existingLead;
+    if (isNew) {
+      await logActivity(request, {
+        action: 'lead.created',
+        category: 'lead',
+        description: `New ${lead.source === 'manual' ? 'manual' : 'WhatsApp'} lead: ${lead.name || lead.phone}`,
+        targetType: 'Lead',
+        targetId: lead._id,
+        targetLabel: lead.name || lead.phone,
+        severity: 'success',
+        changes: { phone: lead.phone, source: lead.source || 'whatsapp_bot' },
+      });
+    }
+
+    return NextResponse.json(
+      { success: true, data: lead, message: isNew ? 'Lead created successfully' : 'Lead updated successfully' },
+      { status: isNew ? 201 : 200 }
+    );
+  } catch (error) {
+    console.error('Error in POST /api/leads:', error);
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map((e) => e.message);
+      return NextResponse.json({ error: 'Validation failed', details: errors }, { status: 400 });
+    }
+    return NextResponse.json({ error: 'Failed to create lead', message: error.message }, { status: 500 });
+  }
+}
