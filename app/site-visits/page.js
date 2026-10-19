@@ -37,7 +37,7 @@ export default function SiteVisitsPage() {
   const [visits, setVisits] = useState([]);
   const [stats, setStats] = useState({ total: 0, today: 0, pending: 0, completed: 0 });
   const [loading, setLoading] = useState(true);
-  const [activeStatus, setActiveStatus] = useState('today');
+  const [activeStatus, setActiveStatus] = useState('all');
   const [search, setSearch] = useState('');
   const [filterProperty, setFilterProperty] = useState('');
   const [page, setPage] = useState(1);

@@ -13,7 +13,7 @@ import {
 } from '@/lib/site-visit-time';
 import {
   ArrowLeft, Phone, MessageSquare,
-  Star, Building2, Image as ImageIcon, Pencil, Trash2,
+  Star, Building2, Image as ImageIcon, Pencil,
   Bell, Calendar, UserRoundPen, Plus, X, Loader2, StickyNote,
 } from 'lucide-react';
 
@@ -163,7 +163,6 @@ export default function LeadDetailPage() {
   const [savingSiteVisit, setSavingSiteVisit] = useState(false);
   const [siteVisitForm, setSiteVisitForm] = useState({ propertyId: '', date: '', time: '', notes: '' });
   const [editingVisit, setEditingVisit] = useState(null);
-  const [deletingVisitId, setDeletingVisitId] = useState('');
 
   useEffect(() => {
     if (!user?.role) return;
@@ -392,25 +391,6 @@ export default function LeadDetailPage() {
     }
   };
 
-  const deleteSiteVisit = async (visit) => {
-    if (!confirm('Delete this site visit? This cannot be undone.')) return;
-    setDeletingVisitId(visit._id);
-    try {
-      const response = await fetch(`/api/site-visits/${visit._id}`, { method: 'DELETE' });
-      const json = await response.json().catch(() => ({}));
-      if (!response.ok || !json.success) throw new Error(json.error || 'Failed to delete site visit');
-      setSubData((previous) => ({
-        ...previous,
-        visits: previous.visits.filter((item) => item._id !== visit._id),
-      }));
-      toast.success('Site visit deleted');
-    } catch (error) {
-      toast.error(error.message || 'Failed to delete site visit');
-    } finally {
-      setDeletingVisitId('');
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-[#f8faf7]">
@@ -472,7 +452,7 @@ export default function LeadDetailPage() {
               >
                 <Plus className="h-4 w-4" /> Add Inquiry
               </button>
-              {user?.role === 'owner' && (
+              {['owner', 'channel_partner'].includes(user?.role) && (
                 <button
                   type="button"
                   onClick={() => setSiteVisitOpen(true)}
@@ -636,15 +616,12 @@ export default function LeadDetailPage() {
             {activeTab === 'visits' && (
               <VisitsTab
                 visits={subData.visits}
-                isOwner={user?.role === 'owner'}
-                deletingVisitId={deletingVisitId}
                 onEdit={(visit) => setEditingVisit({
                   ...visit,
                   date: localDateInput(visit.scheduledDate),
                   time: formatSiteVisitTime(visit.scheduledTime, visit.scheduledDate),
                   propertyId: String(visit.property?._id || visit.property || ''),
                 })}
-                onDelete={deleteSiteVisit}
               />
             )}
             {activeTab === 'notes' && (
@@ -1432,7 +1409,7 @@ function FollowUpsTab({ data }) {
 }
 
 /* ---------- Site Visits — now a table ---------- */
-function VisitsTab({ visits, isOwner, deletingVisitId, onEdit, onDelete }) {
+function VisitsTab({ visits, onEdit }) {
   if (!visits?.length) return <Empty icon={Calendar} text="No site visits yet" />;
 
   return (
@@ -1493,18 +1470,6 @@ function VisitsTab({ visits, isOwner, deletingVisitId, onEdit, onDelete }) {
                   >
                     <Pencil className="h-4 w-4" />
                   </button>
-                  {isOwner && (
-                    <button
-                      type="button"
-                      aria-label="Delete site visit"
-                      title="Delete site visit"
-                      disabled={deletingVisitId === v._id}
-                      onClick={() => onDelete(v)}
-                      className="rounded-lg border border-[#f4d0d0] p-2 text-[#c0392b] hover:bg-[#fde8e8] disabled:opacity-50"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  )}
                 </div>
               </td>
             </tr>

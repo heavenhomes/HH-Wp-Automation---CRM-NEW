@@ -14,8 +14,8 @@ function isValidObjectId(id) {
 export async function POST(request, { params }) {
   try {
     const session = verifySessionToken(request.cookies.get(SESSION_COOKIE_NAME)?.value);
-    if (session?.role !== 'owner') {
-      return NextResponse.json({ error: 'Only the owner can schedule a site visit' }, { status: 403 });
+    if (!session || !['owner', 'channel_partner'].includes(session.role)) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
     if (!isDbConnected()) {
       const conn = await dbConnect();
@@ -49,6 +49,12 @@ export async function POST(request, { params }) {
       Property.findOne({ _id: body.propertyId, status: 'available' }).lean(),
     ]);
     if (!lead) return NextResponse.json({ error: 'Lead not found' }, { status: 404 });
+    if (
+      session.role === 'channel_partner' &&
+      (!session.name || lead.assignedTo?.trim().toLowerCase() !== session.name.trim().toLowerCase())
+    ) {
+      return NextResponse.json({ error: 'You can only schedule site visits for leads assigned to you' }, { status: 403 });
+    }
     if (!property) return NextResponse.json({ error: 'Available property not found' }, { status: 404 });
 
     const visit = await SiteVisit.create({
