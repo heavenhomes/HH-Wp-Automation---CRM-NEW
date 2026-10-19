@@ -4,6 +4,8 @@ import { useAuth } from "@/lib/auth/useAuth";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
+import TimePicker from '@/components/SiteVisits/TimePicker';
+import { createLocalDateTime } from '@/lib/site-visit-time';
 import {
   Search,
   Users,
@@ -24,6 +26,7 @@ import {
 
 const STATUS_FILTER_OPTIONS = [
   { value: "", label: "All Status" },
+  { value: "active_leads", label: "All Active Leads" },
   { value: "new", label: "New" },
   { value: "follow_up", label: "Follow Up" },
   { value: "active", label: "Active" },
@@ -186,7 +189,8 @@ export default function LeadsPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
-  const [filterCity, setFilterCity] = useState("");
+  const [filterSource, setFilterSource] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
   const [pagination, setPagination] = useState({
     total: 0,
     page: 1,
@@ -220,7 +224,8 @@ export default function LeadsPage() {
     timeline: "",
     furnishing: "",
     investmentType: "",
-    siteVisit: "",
+    siteVisitDate: "",
+    siteVisitTime: "",
     interested: "",
     spaceSize: "",
     currentStatus: "new",
@@ -282,38 +287,40 @@ export default function LeadsPage() {
     }
   };
 
-  const fetchLeads = async () => {
-    try {
-      setLoading(true);
-      const params = new URLSearchParams({
-        page: pagination.page,
-        limit: pagination.limit,
-      });
-      // Pass CRM status filter separately so backend can filter by currentStatus
-      if (filterStatus) params.set("currentStatus", filterStatus);
-      if (filterCity) params.set("city", filterCity);
-      const res = await fetch(`/api/leads?${params}`);
-      const json = await res.json();
-      if (json.success) {
-        setLeads(json.data);
-        setPagination((p) => ({ ...p, ...json.pagination }));
-      } else {
-        toast.error("Failed to fetch leads");
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to fetch leads");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
     fetchStats();
   }, []);
   useEffect(() => {
-    fetchLeads(); /* eslint-disable-next-line */
-  }, [pagination.page, filterStatus, filterCity]);
+    const controller = new AbortController();
+    const loadLeads = async () => {
+      try {
+        setLoading(true);
+        const params = new URLSearchParams({
+          page: pagination.page,
+          limit: pagination.limit,
+        });
+        if (filterStatus) params.set("currentStatus", filterStatus);
+        if (filterSource) params.set("source", filterSource);
+        if (searchTerm.trim()) params.set("search", searchTerm.trim());
+        const response = await fetch(`/api/leads?${params}`, { signal: controller.signal });
+        const json = await response.json();
+        if (!response.ok || !json.success) {
+          throw new Error(json.error || "Failed to fetch leads");
+        }
+        setLeads(json.data);
+        setPagination((previous) => ({ ...previous, ...json.pagination }));
+      } catch (error) {
+        if (error.name !== "AbortError") {
+          console.error(error);
+          toast.error(error.message || "Failed to fetch leads");
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    };
+    loadLeads();
+    return () => controller.abort();
+  }, [pagination.page, pagination.limit, filterStatus, filterSource, searchTerm, refreshKey]);
 
   useEffect(() => {
     if (!addOpen) return;
@@ -541,7 +548,8 @@ export default function LeadsPage() {
       timeline: "",
       furnishing: "",
       investmentType: "",
-      siteVisit: "",
+      siteVisitDate: "",
+      siteVisitTime: "",
       interested: "",
       spaceSize: "",
       currentStatus: "new",
@@ -587,7 +595,7 @@ export default function LeadsPage() {
           ...form,
           city: "Surat",
           phoneNumber: form.phoneNumber.trim() || form.phone.trim(),
-          siteVisit: form.siteVisit ? new Date(form.siteVisit).toISOString() : "",
+          siteVisit: createLocalDateTime(form.siteVisitDate, form.siteVisitTime)?.toISOString() || "",
           source: "manual",
         }),
       });
@@ -595,7 +603,11 @@ export default function LeadsPage() {
       if (json.success) {
         toast.success("Lead added");
         closeAddModal();
-        fetchLeads();
+        setSearchTerm("");
+        setFilterStatus("");
+        setFilterSource("");
+        setPagination((previous) => ({ ...previous, page: 1 }));
+        setRefreshKey((previous) => previous + 1);
         fetchStats();
       } else {
         toast.error(
@@ -711,16 +723,14 @@ export default function LeadsPage() {
     setForm((previous) => ({ ...previous, budgetRange: value, rentBudgetLabel: '' }));
   };
 
-  const filteredLeads = leads.filter((lead) => {
-    if (!searchTerm) return true;
-    const q = searchTerm.toLowerCase();
-    return (
-      lead.name?.toLowerCase().includes(q) ||
-      lead.phone?.includes(q) ||
-      lead.city?.toLowerCase().includes(q) ||
-      lead.area?.toLowerCase().includes(q)
-    );
-  });
+  const filteredLeads = leads;
+
+  const applyKpiFilter = (status) => {
+    setSearchTerm("");
+    setFilterSource("");
+    setFilterStatus(status);
+    setPagination((previous) => ({ ...previous, page: 1 }));
+  };
 
   const statusMap = {
     new: { pillClass: "status-new", label: "New" },
@@ -834,24 +844,33 @@ export default function LeadsPage() {
 
       {/* 4 KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
-        <KpiCard icon={Users} label="Total Leads" value={stats.total} tone="blue" />
+        <KpiCard
+          icon={Users}
+          label="Total Leads"
+          value={stats.total}
+          tone="blue"
+          onClick={() => applyKpiFilter("")}
+        />
         <KpiCard
           icon={Star}
-          label="Follow Up"
+          label="In Follow-ups"
           value={stats.followUp}
           tone="purple"
+          onClick={() => applyKpiFilter("follow_up")}
         />
         <KpiCard
           icon={UserPlus}
           label="Active Leads"
           value={stats.active}
           tone="amber"
+          onClick={() => applyKpiFilter("active_leads")}
         />
         <KpiCard
           icon={UserCheck}
-          label="Converted Leads"
+          label="Converted Clients"
           value={stats.converted}
           tone="green"
+          onClick={() => applyKpiFilter("converted")}
         />
       </div>
 
@@ -862,10 +881,13 @@ export default function LeadsPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6a7f6a]" />
             <input
               type="text"
-              placeholder="Search by name, phone, city..."
+              placeholder="Search by name or phone..."
               className="w-full pl-10 pr-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setPagination((previous) => ({ ...previous, page: 1 }));
+              }}
             />
           </div>
           <select
@@ -882,16 +904,18 @@ export default function LeadsPage() {
               </option>
             ))}
           </select>
-          <input
-            type="text"
-            placeholder="Filter by city..."
-            className="px-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a] md:w-44"
-            value={filterCity}
+          <select
+            className="px-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a] md:w-52"
+            value={filterSource}
             onChange={(e) => {
-              setFilterCity(e.target.value);
-              setPagination((p) => ({ ...p, page: 1 }));
+              setFilterSource(e.target.value);
+              setPagination((previous) => ({ ...previous, page: 1 }));
             }}
-          />
+          >
+            <option value="">All Sources</option>
+            <option value="manual">Manual</option>
+            <option value="whatsapp_bot">WhatsApp</option>
+          </select>
         </div>
       </div>
 
@@ -1309,12 +1333,18 @@ export default function LeadsPage() {
                 )}
                 {form.purchaseType && (
                 <Field label="Preferred Site Visit Date and Time (optional)">
-                  <input
-                    type="datetime-local"
-                    value={form.siteVisit}
-                    onChange={(e) => setForm((p) => ({ ...p, siteVisit: e.target.value }))}
-                    className="w-full px-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
-                  />
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <input
+                      type="date"
+                      value={form.siteVisitDate}
+                      onChange={(e) => setForm((p) => ({ ...p, siteVisitDate: e.target.value }))}
+                      className="w-full px-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
+                    />
+                    <TimePicker
+                      value={form.siteVisitTime}
+                      onChange={(time) => setForm((p) => ({ ...p, siteVisitTime: time }))}
+                    />
+                  </div>
                 </Field>
                 )}
                 {isOwner ? (
@@ -1417,7 +1447,7 @@ function Th({ children, align = "left", hidden = false }) {
   return <th className={cls}>{children}</th>;
 }
 
-function KpiCard({ icon: Icon, label, value, tone }) {
+function KpiCard({ icon: Icon, label, value, tone, onClick }) {
   const tones = {
     blue: { bg: "bg-[#e6f0fb]", fg: "text-[#2a6ba8]" },
     amber: { bg: "bg-[#fef7e0]", fg: "text-[#b68b40]" },
@@ -1425,24 +1455,32 @@ function KpiCard({ icon: Icon, label, value, tone }) {
     purple: { bg: "bg-[#f3e8ff]", fg: "text-[#7a3aa8]" },
   };
   const t = tones[tone] || tones.green;
-  return (
-    <div className="bg-white rounded-2xl border border-[#e8f0e6] p-3.5 sm:p-4 shadow-sm hover:shadow-md transition-shadow duration-200 h-full flex items-center">
-      <div className="flex items-center gap-3 w-full min-w-0">
-        <div
-          className={`w-10 h-10 sm:w-11 sm:h-11 ${t.bg} rounded-xl flex items-center justify-center flex-shrink-0`}
-        >
-          <Icon className={`w-4 h-4 sm:w-5 sm:h-5 ${t.fg}`} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-[10px] sm:text-[11px] font-medium text-[#6a7f6a] uppercase tracking-wider truncate">
-            {label}
-          </p>
-          <p className="text-xl sm:text-2xl font-bold text-[#1a2e1a] leading-tight mt-0.5">
-            {value}
-          </p>
-        </div>
+  const className = `w-full bg-white rounded-2xl border border-[#e8f0e6] p-3.5 sm:p-4 shadow-sm transition-shadow duration-200 h-full flex items-center ${
+    onClick
+      ? "cursor-pointer text-left hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#2d7a3a]"
+      : ""
+  }`;
+  const content = (
+    <div className="flex items-center gap-3 w-full min-w-0">
+      <div
+        className={`w-10 h-10 sm:w-11 sm:h-11 ${t.bg} rounded-xl flex items-center justify-center flex-shrink-0`}
+      >
+        <Icon className={`w-4 h-4 sm:w-5 sm:h-5 ${t.fg}`} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] sm:text-[11px] font-medium text-[#6a7f6a] uppercase tracking-wider truncate">
+          {label}
+        </p>
+        <p className="text-xl sm:text-2xl font-bold text-[#1a2e1a] leading-tight mt-0.5">
+          {value}
+        </p>
       </div>
     </div>
+  );
+  return (
+    onClick
+      ? <button type="button" onClick={onClick} className={className}>{content}</button>
+      : <div className={className}>{content}</div>
   );
 }
 

@@ -46,9 +46,7 @@ export async function GET(request) {
       Lead.countDocuments({ ...scope }),
       Lead.countDocuments({
         ...scope,
-        currentStatus: {
-          $in: ['active', 'contacted', 'interested', 'site_visit_scheduled', 'site_visit_completed', 're_visit'],
-        },
+        currentStatus: { $nin: ['lost', 'converted'] },
       }),
       Lead.countDocuments({ ...scope, currentStatus: 'converted' }),
       Lead.countDocuments({ ...scope, currentStatus: 'new' }),

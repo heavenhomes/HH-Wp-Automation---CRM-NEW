@@ -40,7 +40,10 @@ export async function GET(request) {
     const currentStatus = searchParams.get('currentStatus');
     const leadType = searchParams.get('leadType');
     const city = searchParams.get('city');
+    const assignedTo = searchParams.get('assignedTo')?.trim();
     const propertyType = searchParams.get('propertyType');
+    const source = searchParams.get('source');
+    const search = searchParams.get('search')?.trim();
 
     // ---- Determine caller role ----
     const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -59,10 +62,32 @@ export async function GET(request) {
 
     if (status === 'completed') query.step = 'completed';
     else if (status === 'active') query.step = { $ne: 'completed' };
-    if (currentStatus) query.currentStatus = currentStatus;  
+    if (currentStatus === 'active_leads') {
+      query.currentStatus = { $nin: ['lost', 'converted'] };
+    } else if (currentStatus) {
+      query.currentStatus = currentStatus;
+    }
     if (leadType) query.leadType = leadType;
     if (city) query.city = { $regex: escapeRegex(city), $options: 'i' };
+    if (assignedTo && isOwner) {
+      query.assignedTo = {
+        $regex: `^\\s*${escapeRegex(assignedTo)}\\s*$`,
+        $options: 'i',
+      };
+    }
     if (propertyType) query.propertyType = { $regex: escapeRegex(propertyType), $options: 'i' };
+    if (source === 'manual' || source === 'whatsapp_bot') query.source = source;
+    if (search) {
+      const searchRegex = { $regex: escapeRegex(search), $options: 'i' };
+      query.$or = [
+        { name: searchRegex },
+        { phone: searchRegex },
+        { phoneNumber: searchRegex },
+        { city: searchRegex },
+        { area: searchRegex },
+        { assignedTo: searchRegex },
+      ];
+    }
 
     const [leads, total] = await Promise.all([
       Lead.find(query)

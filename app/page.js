@@ -2,19 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import {
-  Chart as ChartJS,
-  CategoryScale, LinearScale, PointElement, LineElement,
-  Title, Tooltip, Legend, Filler,
-} from 'chart.js';
-import { Line } from 'react-chartjs-2';
+import { formatSiteVisitTime } from '@/lib/site-visit-time';
 import {
   Users, Building2, UserCheck, Calendar,
   UserCircle, ArrowRight, FolderOpen,
-  Phone, BarChart3, Clock, Bell, X,
+  Phone, Clock, Bell, X,
 } from 'lucide-react';
-
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
 
 export default function Dashboard() {
   const [stats, setStats] = useState({
@@ -24,15 +17,11 @@ export default function Dashboard() {
     convertedClients: 0,
   });
   const [recentLeads, setRecentLeads] = useState([]);
-  const [pendingVisits, setPendingVisits] = useState([]);
+  const [todayVisits, setTodayVisits] = useState([]);
+  const [yesterdayVisits, setYesterdayVisits] = useState([]);
   const [leadReminders, setLeadReminders] = useState([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
-    const [chartHistory, setChartHistory] = useState({
-    labels: [],
-    leads: [],
-    conversions: [],
-  });
 
   const fetchLeadReminders = async () => {
     try {
@@ -45,85 +34,6 @@ export default function Dashboard() {
     }
   };
 
-  // Chart data — built from real /api/leads/history response
-  const chartData = {
-    labels: chartHistory.labels,
-    datasets: [
-      {
-        label: 'Leads',
-        data: chartHistory.leads,
-        borderColor: '#2d7a3a',
-        backgroundColor: 'rgba(45, 122, 58, 0.08)',
-        borderWidth: 2.5,
-        fill: true,
-        tension: 0.3,
-        pointBackgroundColor: '#2d7a3a',
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2,
-        pointRadius: 4,
-        pointHoverRadius: 6,
-      },
-      {
-        label: 'Conversions',
-        data: chartHistory.conversions,
-        borderColor: '#6fbf73',
-        backgroundColor: 'rgba(111, 191, 115, 0.08)',
-        borderWidth: 2.5,
-        fill: true,
-        tension: 0.3,
-        pointBackgroundColor: '#6fbf73',
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2,
-        pointRadius: 4,
-        pointHoverRadius: 6,
-      },
-    ],
-  };
-
-  const chartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        display: true,
-        position: 'top',
-        align: 'end',
-        labels: {
-          usePointStyle: true,
-          pointStyle: 'circle',
-          padding: 16,
-          font: { size: 11, weight: '500', family: 'Inter' },
-          color: '#1e2a1e',
-          boxWidth: 8,
-          boxHeight: 8,
-        },
-      },
-      tooltip: {
-        backgroundColor: 'rgba(255,255,255,0.98)',
-        titleColor: '#1e2a1e',
-        bodyColor: '#2d4a2d',
-        borderColor: '#e8f0e6',
-        borderWidth: 1,
-        padding: 12,
-        cornerRadius: 8,
-        titleFont: { size: 12, weight: '600' },
-        bodyFont: { size: 12 },
-      },
-    },
-    scales: {
-      y: {
-        beginAtZero: true,
-        grid: { color: 'rgba(0,0,0,0.04)', drawBorder: false },
-        ticks: { font: { size: 10, family: 'Inter' }, color: '#6a7f6a', padding: 6 },
-      },
-      x: {
-        grid: { display: false },
-        ticks: { font: { size: 10, family: 'Inter' }, color: '#6a7f6a', padding: 6 },
-      },
-    },
-    interaction: { intersect: false, mode: 'index' },
-  };
-
    useEffect(() => {
      fetchLeadReminders();
      const interval = setInterval(fetchLeadReminders, 60 * 1000);
@@ -133,39 +43,62 @@ export default function Dashboard() {
    useEffect(() => {
      (async () => {
       try {
-        const [statsRes, leadsRes, visitsRes, historyRes] = await Promise.all([
-          fetch('/api/leads/stats').then((r) => r.json()).catch(() => ({})),
-          fetch('/api/leads?limit=5').then((r) => r.json()).catch(() => ({})),
-          fetch('/api/site-visits?limit=5').then((r) => r.json()).catch(() => ({})),
-          fetch('/api/leads/history?months=6').then((r) => r.json()).catch(() => ({})),
-        ]);
+        const fetchDashboardData = async (url) => {
+          const response = await fetch(url, { cache: 'no-store' });
+          const result = await response.json();
+          if (!response.ok || !result.success) {
+            throw new Error(result.error || `Failed to fetch ${url}`);
+          }
+          return result;
+        };
+        const getDateParams = (daysAgo) => {
+          const date = new Date();
+          date.setHours(0, 0, 0, 0);
+          date.setDate(date.getDate() - daysAgo);
+          const dateKey = [
+            date.getFullYear(),
+            String(date.getMonth() + 1).padStart(2, '0'),
+            String(date.getDate()).padStart(2, '0'),
+          ].join('-');
+          return `date=today&dateKey=${dateKey}&timezoneOffset=${date.getTimezoneOffset()}`;
+        };
+        const fetchVisitsForDate = async (daysAgo, status) => {
+          const params = new URLSearchParams(getDateParams(daysAgo));
+          params.set('limit', '200');
+          if (status) params.set('status', status);
+          const firstPage = await fetchDashboardData(`/api/site-visits?${params}`);
+          const visits = [...(firstPage.data || [])];
+          for (let page = 2; page <= (firstPage.pagination?.pages || 1); page += 1) {
+            params.set('page', String(page));
+            const nextPage = await fetchDashboardData(`/api/site-visits?${params}`);
+            visits.push(...(nextPage.data || []));
+          }
+          return { ...firstPage, data: visits };
+        };
+        const [statsRes, leadsRes, pendingRes, propertiesRes, todayRes, yesterdayRes, dayBeforeRes] =
+          await Promise.all([
+            fetchDashboardData('/api/leads/stats'),
+            fetchDashboardData('/api/leads?limit=5'),
+            fetchDashboardData('/api/site-visits?status=pending&limit=1'),
+            fetchDashboardData('/api/properties?status=available&limit=1'),
+            fetchVisitsForDate(0),
+            fetchVisitsForDate(1, 'pending'),
+            fetchVisitsForDate(2, 'pending'),
+          ]);
 
         setStats({
           activeLeads: statsRes?.data?.active ?? 0,
           convertedClients: statsRes?.data?.converted ?? 0,
-          activeProperties: statsRes?.data?.byCategory
-            ? (statsRes.data.byCategory.purchase || 0) +
-              (statsRes.data.byCategory.rent || 0) +
-              (statsRes.data.byCategory.rentOut || 0)
-            : 0,
-          pendingSiteVisits:
-            visitsRes?.data?.filter((v) => v.status === 'pending').length ?? 0,
+          activeProperties: propertiesRes?.pagination?.total ?? 0,
+          pendingSiteVisits: pendingRes?.pagination?.total ?? 0,
         });
 
         setRecentLeads(leadsRes?.data || []);
-        setPendingVisits(
-          (visitsRes?.data || [])
-            .filter((v) => v.status !== 'completed')
-            .slice(0, 5)
+        setTodayVisits(todayRes?.data || []);
+        setYesterdayVisits(
+          [...(yesterdayRes?.data || []), ...(dayBeforeRes?.data || [])]
+            .sort((a, b) => new Date(b.scheduledDate) - new Date(a.scheduledDate))
         );
-
-        if (historyRes?.success && historyRes.data) {
-          setChartHistory({
-            labels: historyRes.data.labels || [],
-            leads: historyRes.data.leads || [],
-            conversions: historyRes.data.conversions || [],
-          });
-        }
       } catch (err) {
         console.error('Dashboard fetch error:', err);
       } finally {
@@ -228,7 +161,7 @@ export default function Dashboard() {
                     <X className="h-4 w-4" />
                   </button>
                 </div>
-                <div className="max-h-80 divide-y divide-[#eef5ec] overflow-y-auto">
+                <div className="max-h-80 divide-y divide-[#eef5ec] overflow-y-auto scrollbar-hidden">
                   {leadReminders.length === 0 ? (
                     <p className="px-4 py-8 text-center text-sm text-[#6a7f6a]">No upcoming manual follow-ups.</p>
                   ) : leadReminders.map((reminder) => (
@@ -260,32 +193,15 @@ export default function Dashboard() {
 
       {/* KPI Cards — moderate size, equal height, 2×2 on mobile, 4 across on desktop */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
-        <MiniStatCard icon={Users} label="Active Leads" value={stats.activeLeads} />
-        <MiniStatCard icon={Calendar} label="Pending Site Visits" value={stats.pendingSiteVisits} />
-        <MiniStatCard icon={Building2} label="Active Properties" value={stats.activeProperties} />
+        <MiniStatCard href="/leads" icon={Users} label="Active Leads" value={stats.activeLeads} />
+        <MiniStatCard href="/site-visits" icon={Calendar} label="Pending Site Visits" value={stats.pendingSiteVisits} />
+        <MiniStatCard href="/properties" icon={Building2} label="Active Properties" value={stats.activeProperties} />
         <MiniStatCard icon={UserCheck} label="Converted Clients" value={stats.convertedClients} />
       </div>
 
-      {/* Chart (60%) + Recent Leads (40%) — side-by-side on desktop */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 sm:gap-5 mb-6">
-        {/* Chart — spans 3 of 5 columns (60%) */}
-        <div className="lg:col-span-3 bg-white rounded-2xl border border-[#e8f0e6] p-4 sm:p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-4 gap-2">
-            <h2 className="text-sm sm:text-base font-semibold text-[#1a2e1a] flex items-center gap-2 min-w-0">
-              <BarChart3 className="w-4 h-4 text-[#2d7a3a] flex-shrink-0" />
-              <span className="truncate">Leads vs Conversions</span>
-            </h2>
-            <span className="text-xs text-[#6a7f6a] bg-[#f0f7ef] px-3 py-1 rounded-full flex-shrink-0 whitespace-nowrap">
-              Last 6 months
-            </span>
-          </div>
-          <div className="h-[240px] sm:h-[280px] lg:h-[320px]">
-            <Line data={chartData} options={chartOptions} />
-          </div>
-        </div>
-
-        {/* Recent Leads — spans 2 of 5 columns (40%) */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-[#e8f0e6] overflow-hidden shadow-sm flex flex-col">
+      {/* Recent leads and today's visits share the row equally on desktop */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 mb-6">
+        <div className="min-w-0 h-[360px] sm:h-[380px] lg:h-[400px] min-h-0 bg-white rounded-2xl border border-[#e8f0e6] overflow-hidden shadow-sm flex flex-col">
           <div className="px-4 sm:px-5 py-3.5 border-b border-[#e8f0e6] flex items-center justify-between bg-[#fafffa]">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <UserCircle className="w-4 h-4 text-[#2d7a3a] flex-shrink-0" />
@@ -301,7 +217,7 @@ export default function Dashboard() {
             </Link>
           </div>
 
-          <div className="divide-y divide-[#eef5ec] flex-1 overflow-y-auto">
+          <div className="divide-y divide-[#eef5ec] flex-1 min-h-0 overflow-y-auto scrollbar-hidden">
             {recentLeads.length === 0 ? (
               <div className="text-center py-10 text-[#6a7f6a] text-sm">
                 <FolderOpen className="w-4 h-4 inline-block mr-2" />
@@ -312,7 +228,7 @@ export default function Dashboard() {
                 <Link
                   key={lead._id}
                   href={`/leads/${lead._id}`}
-                  className="block px-4 sm:px-5 py-3 hover:bg-[#fafffa] transition-colors group"
+                  className="block px-4 sm:px-5 py-2.5 hover:bg-[#fafffa] transition-colors group"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
@@ -347,131 +263,25 @@ export default function Dashboard() {
             )}
           </div>
         </div>
+
+        <div className="min-w-0 h-[360px] sm:h-[380px] lg:h-[400px] min-h-0 bg-white rounded-2xl border border-[#e8f0e6] overflow-hidden shadow-sm flex flex-col">
+          <DashboardSectionHeader
+            icon={Calendar}
+            title="Today Site Visit"
+            href="/site-visits"
+          />
+          <SiteVisitTable visits={todayVisits} emptyMessage="No site visits scheduled for today" />
+        </div>
       </div>
 
-      {/* Pending Site Visits */}
+      {/* Pending visits from yesterday and the day before */}
       <div className="bg-white rounded-2xl border border-[#e8f0e6] overflow-hidden shadow-sm mb-6">
-        <div className="px-4 sm:px-5 py-4 border-b border-[#e8f0e6] flex items-center justify-between bg-[#fafffa]">
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <Clock className="w-4 h-4 text-[#2d7a3a] flex-shrink-0" />
-            <h2 className="text-sm font-semibold text-[#1a2e1a] truncate">
-              Pending Site Visits
-            </h2>
-          </div>
-          <Link
-            href="/site-visits"
-            className="text-xs font-medium text-[#2d7a3a] hover:text-[#23682e] transition-colors flex items-center gap-1 flex-shrink-0"
-          >
-            View all <ArrowRight className="w-3 h-3" />
-          </Link>
-        </div>
-
-        {/* Mobile — stacked cards */}
-        <div className="md:hidden divide-y divide-[#eef5ec]">
-          {pendingVisits.length === 0 ? (
-            <div className="text-center py-8 text-[#6a7f6a] text-sm">
-              <FolderOpen className="w-4 h-4 inline-block mr-2" />
-              No pending site visits
-            </div>
-          ) : (
-            pendingVisits.map((visit) => (
-              <div key={visit._id} className="px-4 py-3">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-sm font-medium text-[#1a2e1a] truncate">
-                    {visit.leadName || 'N/A'}
-                  </p>
-                  <VisitStatusBadge status={visit.status} />
-                </div>
-                <p className="text-xs text-[#4f6b4f] mt-1">{visit.propertyTitle || 'N/A'}</p>
-                <div className="flex items-center justify-between mt-1.5">
-                  <span className="text-xs text-[#6a7f6a] flex items-center gap-1">
-                    <Phone className="w-3 h-3" />
-                    {visit.leadPhone || 'N/A'}
-                  </span>
-                  <span className="text-xs text-[#6a7f6a]">
-                    {visit.rawPreferredDateTime
-                      ? visit.rawPreferredDateTime
-                      : visit.scheduledDate
-                      ? new Date(visit.scheduledDate).toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })
-                      : 'N/A'}
-                  </span>
-                </div>
-                <p className="text-xs text-[#6a7f6a] mt-1">
-                  Channel Partner: {visit.channelPartnerName || 'Not assigned'}
-                </p>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* Desktop table */}
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full min-w-[700px]">
-            <thead>
-              <tr className="bg-[#fafffa]">
-                <th className="text-left px-5 py-3 text-xs font-medium text-[#6a7f6a] uppercase tracking-wider">Name</th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-[#6a7f6a] uppercase tracking-wider">Property</th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-[#6a7f6a] uppercase tracking-wider">Contact</th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-[#6a7f6a] uppercase tracking-wider">Date</th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-[#6a7f6a] uppercase tracking-wider">Channel Partner</th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-[#6a7f6a] uppercase tracking-wider">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pendingVisits.length === 0 ? (
-                <tr className="border-t border-[#eef5ec]">
-                  <td colSpan="6" className="text-center py-8 text-[#6a7f6a] text-sm">
-                    <FolderOpen className="w-4 h-4 inline-block mr-2" />
-                    No pending site visits
-                  </td>
-                </tr>
-              ) : (
-                pendingVisits.map((visit) => (
-                  <tr
-                    key={visit._id}
-                    className="border-t border-[#eef5ec] hover:bg-[#fafffa] transition-colors"
-                  >
-                    <td className="px-5 py-3 text-sm font-medium text-[#1a2e1a]">
-                      {visit.leadName || 'N/A'}
-                    </td>
-                    <td className="px-5 py-3 text-sm text-[#4f6b4f]">
-                      {visit.propertyTitle || 'N/A'}
-                    </td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-1">
-                        <Phone className="w-3 h-3 text-[#6a7f6a]" />
-                        <span className="text-sm text-[#4f6b4f]">
-                          {visit.leadPhone || 'N/A'}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-3 text-sm text-[#4f6b4f]">
-                      {visit.rawPreferredDateTime
-                        ? visit.rawPreferredDateTime
-                        : visit.scheduledDate
-                        ? new Date(visit.scheduledDate).toLocaleDateString('en-US', {
-                            month: 'short',
-                            day: 'numeric',
-                            year: 'numeric',
-                          })
-                        : 'N/A'}
-                    </td>
-                    <td className="px-5 py-3 text-sm text-[#4f6b4f]">
-                      {visit.channelPartnerName || 'Not assigned'}
-                    </td>
-                    <td className="px-5 py-3">
-                      <VisitStatusBadge status={visit.status} />
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        <DashboardSectionHeader
+          icon={Clock}
+          title="Yesterday Site Visit"
+          href="/site-visits"
+        />
+        <SiteVisitTable visits={yesterdayVisits} emptyMessage="No pending site visits from yesterday or the day before" />
       </div>
     </div>
   );
@@ -479,9 +289,106 @@ export default function Dashboard() {
 
 /* -------------------- Components -------------------- */
 
-function MiniStatCard({ icon: Icon, label, value }) {
+function DashboardSectionHeader({ icon: Icon, title, href }) {
   return (
-    <div className="bg-white rounded-2xl border border-[#e8f0e6] p-3.5 sm:p-4 shadow-sm hover:shadow-md transition-shadow duration-200 h-full flex items-center">
+    <div className="px-4 sm:px-5 py-3.5 border-b border-[#e8f0e6] flex items-center justify-between bg-[#fafffa]">
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+        <Icon className="w-4 h-4 text-[#2d7a3a] flex-shrink-0" />
+        <h2 className="text-sm font-semibold text-[#1a2e1a] truncate">{title}</h2>
+      </div>
+      <Link
+        href={href}
+        className="text-xs font-medium text-[#2d7a3a] hover:text-[#23682e] transition-colors flex items-center gap-1 flex-shrink-0"
+      >
+        View all <ArrowRight className="w-3 h-3" />
+      </Link>
+    </div>
+  );
+}
+
+function SiteVisitTable({ visits, emptyMessage }) {
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hidden">
+      {visits.length === 0 ? (
+        <div className="px-4 py-8 text-center text-sm text-[#6a7f6a]">
+          <FolderOpen className="w-4 h-4 inline-block mr-2" />
+          {emptyMessage}
+        </div>
+      ) : (
+        <>
+          <div className="divide-y divide-[#eef5ec] 2xl:hidden">
+            {visits.map((visit) => (
+              <div key={visit._id} className="px-4 py-3 hover:bg-[#fafffa]">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="min-w-0 truncate text-sm font-medium text-[#1a2e1a]">{visit.leadName || 'N/A'}</p>
+                  <VisitStatusBadge status={visit.status} />
+                </div>
+                <p className="mt-1 truncate text-xs text-[#4f6b4f]">{visit.propertyTitle || 'N/A'}</p>
+                <div className="mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-[#6a7f6a]">
+                  <span className="inline-flex items-center gap-1">
+                    <Phone className="w-3 h-3" />
+                    {visit.leadPhone || 'N/A'}
+                  </span>
+                  <span className="text-right">
+                    {formatVisitDate(visit.scheduledDate)}
+                    {visit.scheduledTime ? ` · ${formatSiteVisitTime(visit.scheduledTime, visit.scheduledDate)}` : ''}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="hidden min-w-0 2xl:block">
+            <table className="w-full table-fixed">
+              <thead>
+                <tr className="bg-[#fafffa]">
+                  <th className="text-left px-4 py-2.5 text-xs font-medium text-[#6a7f6a] uppercase tracking-wider">Name</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-medium text-[#6a7f6a] uppercase tracking-wider">Property</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-medium text-[#6a7f6a] uppercase tracking-wider">Contact</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-medium text-[#6a7f6a] uppercase tracking-wider">Date &amp; Time</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-medium text-[#6a7f6a] uppercase tracking-wider">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visits.map((visit) => (
+                  <tr key={visit._id} className="border-t border-[#eef5ec] hover:bg-[#fafffa] transition-colors">
+                    <td className="px-2 py-2.5 text-sm font-medium text-[#1a2e1a]"><span className="block truncate">{visit.leadName || 'N/A'}</span></td>
+                    <td className="px-2 py-2.5 text-sm text-[#4f6b4f]"><span className="block truncate">{visit.propertyTitle || 'N/A'}</span></td>
+                    <td className="px-2 py-2.5 text-sm text-[#4f6b4f]"><span className="block truncate">{visit.leadPhone || 'N/A'}</span></td>
+                    <td className="px-2 py-2.5 text-sm text-[#4f6b4f]">
+                      {formatVisitDate(visit.scheduledDate)}
+                      {visit.scheduledTime && <div className="text-xs text-[#6a7f6a]">{formatSiteVisitTime(visit.scheduledTime, visit.scheduledDate)}</div>}
+                    </td>
+                    <td className="px-2 py-2.5"><VisitStatusBadge status={visit.status} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function formatVisitDate(date) {
+  return date
+    ? new Date(date).toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      })
+    : 'N/A';
+}
+
+function MiniStatCard({ icon: Icon, label, value, href }) {
+  const Card = href ? Link : 'div';
+  return (
+    <Card
+      {...(href ? { href } : {})}
+      className={`bg-white rounded-2xl border border-[#e8f0e6] p-3.5 sm:p-4 shadow-sm transition-shadow duration-200 h-full flex items-center ${
+        href ? 'hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#2d7a3a]' : ''
+      }`}
+    >
       <div className="flex items-center gap-3 w-full min-w-0">
         <div className="w-10 h-10 sm:w-11 sm:h-11 bg-[#e8f5e6] rounded-xl flex items-center justify-center flex-shrink-0">
           <Icon className="w-4 h-4 sm:w-5 sm:h-5 text-[#2d7a3a]" />
@@ -495,7 +402,7 @@ function MiniStatCard({ icon: Icon, label, value }) {
           </p>
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 

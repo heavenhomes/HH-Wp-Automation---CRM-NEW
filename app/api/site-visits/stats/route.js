@@ -50,7 +50,7 @@ export async function GET(request) {
         scheduledDate: { $gte: todayStart, $lte: todayEnd },
         status: { $nin: ['cancelled'] },
       }),
-      SiteVisit.countDocuments({ ...scope, status: { $in: ['pending', 'scheduled'] } }),
+      SiteVisit.countDocuments({ ...scope, status: 'pending' }),
       SiteVisit.countDocuments({ ...scope, status: 'completed' }),
       SiteVisit.countDocuments({ ...scope, status: 'scheduled' }),
       SiteVisit.countDocuments({ ...scope, status: 'rescheduled' }),

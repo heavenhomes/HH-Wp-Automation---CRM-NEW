@@ -5,6 +5,7 @@ import Property from '@/lib/models/Property';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { NextResponse } from 'next/server';
 import { logActivity } from '@/lib/activity/log';
+import { formatSiteVisitTime } from '@/lib/site-visit-time';
 
 function escapeRegex(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -40,6 +41,8 @@ export async function GET(request) {
     const status = searchParams.get('status');
     const search = searchParams.get('search');
     const dateFilter = searchParams.get('date');
+    const propertyId = searchParams.get('propertyId');
+    const scheduledDate = searchParams.get('scheduledDate');
 
     // ---- Determine caller role ----
     const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -54,9 +57,15 @@ export async function GET(request) {
     }
 
     if (status && status !== 'all') query.status = status;
+    if (propertyId) {
+      if (!isValidObjectId(propertyId)) {
+        return NextResponse.json({ error: 'Invalid property ID' }, { status: 400 });
+      }
+      query.property = propertyId;
+    }
 
-    if (dateFilter === 'today') {
-      const dateKey = searchParams.get('dateKey');
+    if (dateFilter === 'today' || scheduledDate) {
+      const dateKey = dateFilter === 'today' ? searchParams.get('dateKey') : scheduledDate;
       const timezoneOffset = Number(searchParams.get('timezoneOffset'));
       if (
         !dateKey ||
@@ -127,8 +136,8 @@ export async function POST(request) {
   try {
     const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
     const session = verifySessionToken(token);
-    if (!session || !['owner', 'channel_partner'].includes(session.role)) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    if (session?.role !== 'owner') {
+      return NextResponse.json({ error: 'Only the owner can schedule site visits' }, { status: 403 });
     }
 
     if (!isDbConnected()) {
@@ -153,7 +162,8 @@ export async function POST(request) {
       );
     }
     const scheduledDate = new Date(body.scheduledDate);
-    if (!Number.isFinite(scheduledDate.getTime()) || !body.scheduledTime) {
+    const scheduledTime = formatSiteVisitTime(body.scheduledTime);
+    if (!Number.isFinite(scheduledDate.getTime()) || !scheduledTime) {
       return NextResponse.json({ error: 'A valid date and time are required' }, { status: 400 });
     }
 
@@ -164,13 +174,6 @@ export async function POST(request) {
     if (!lead) return NextResponse.json({ error: 'Lead not found' }, { status: 404 });
     if (!property) return NextResponse.json({ error: 'Property not found' }, { status: 404 });
 
-    if (
-      session.role === 'channel_partner' &&
-      (!session.name || lead.assignedTo?.trim().toLowerCase() !== session.name.trim().toLowerCase())
-    ) {
-      return NextResponse.json({ error: 'You can only add visits for leads assigned to you' }, { status: 403 });
-    }
-
     const visit = await SiteVisit.create({
       lead: lead._id,
       property: property._id,
@@ -179,7 +182,7 @@ export async function POST(request) {
       propertyTitle: property.title || '',
       propertyCode: property.propertyId || '',
       scheduledDate,
-      scheduledTime: body.scheduledTime,
+      scheduledTime,
       channelPartnerName: lead.assignedTo || '',
       status: 'scheduled',
       source: 'manual',

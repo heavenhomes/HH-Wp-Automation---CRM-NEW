@@ -20,6 +20,16 @@ You can start editing the page by modifying `app/page.js`. The page auto-updates
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## WhatsApp follow-up templates
+
+The scheduled WhatsApp checks send the `site_visit_reminder`, `property_followup`, and `post_site_visit_followup` templates using the `en`, `hi`, or `gu` language variant. Template body parameters are sent in this order:
+
+- `site_visit_reminder`: customer name, property name, visit date, visit time. Sent two hours before a scheduled visit.
+- `property_followup`: customer name. Sent six days after lead creation, then every six days after the previous send, regardless of enquiry completion. Opted-out leads are excluded.
+- `post_site_visit_followup`: customer name, property name. Sent when an owner or channel partner marks a visit completed.
+
+The numeric IDs from Meta are not used in Cloud API send requests. The Gujarati post-visit template name in the supplied Meta definition is `post_site_visit_followu`, so the sender uses that exact name for Gujarati and `post_site_visit_followup` for English and Hindi. Template quick-reply payloads are passed through to the webhook for the site-visit actions, property follow-up actions, and `main_menu` action. Site-visit reminders and both follow-ups are run by the existing cron jobs.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

@@ -25,6 +25,7 @@ import {
   uniqueTitleCase,
   matchPlace,
 } from '@/lib/place-names';
+import { formatSiteVisitTime } from '@/lib/site-visit-time';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -275,6 +276,15 @@ function parseOneMessage(message) {
       type: 'interactive',
       id: chosen?.id,
       title: chosen?.title,
+    };
+  }
+  if (message.type === 'button') {
+    return {
+      from,
+      wamid,
+      type: 'interactive',
+      id: message.button?.payload || message.button?.text,
+      title: message.button?.text,
     };
   }
   if (message.type === 'image') {
@@ -2373,7 +2383,7 @@ async function handleMessage(phone, incoming) {
       year: 'numeric',
       timeZone: 'UTC',
     });
-    const visitTime = visit.scheduledTime || visit.scheduledDate.toLocaleTimeString('en-US', {
+    const visitTime = formatSiteVisitTime(visit.scheduledTime, visit.scheduledDate) || visit.scheduledDate.toLocaleTimeString('en-US', {
       hour: 'numeric',
       minute: '2-digit',
       hour12: true,
@@ -2406,6 +2416,21 @@ async function handleMessage(phone, incoming) {
     await sendTerminalMessage(phone, lead, message, 'siteVisitCancelled', [
       { id: 'main_menu', title: '🏠 Main Menu' },
     ]);
+    return;
+  }
+
+  if (interactiveId === 'fu_show_properties') {
+    if (lead.matchedProperties?.length) {
+      lead.currentPropertyIndex = 0;
+      lead.step = 'showing_property';
+      await lead.save();
+      await sendStepPrompt(phone, lead.step, STEPS[lead.step], lead);
+      return;
+    }
+
+    lead.step = 'askSearchMode';
+    await lead.save();
+    await sendStepPrompt(phone, lead.step, STEPS[lead.step], lead);
     return;
   }
 
@@ -2451,7 +2476,7 @@ async function handleMessage(phone, incoming) {
     lead.siteVisit = text.trim();
     lead.activeSiteVisit = undefined;
     lead.step = 'completed';
-    const message = `✅ Site Visit Rescheduled!\n\n🏡 Property: ${visit.propertyTitle}\n📅 Date: ${visit.scheduledDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}\n⏰ Time: ${visit.scheduledTime}`;
+    const message = `✅ Site Visit Rescheduled!\n\n🏡 Property: ${visit.propertyTitle}\n📅 Date: ${visit.scheduledDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}\n⏰ Time: ${formatSiteVisitTime(visit.scheduledTime, visit.scheduledDate)}`;
     pushConversation(lead, { direction: 'out', type: 'text', text: message });
     await lead.save();
     await sendText(phone, message);

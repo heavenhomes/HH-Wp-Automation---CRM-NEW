@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
-import { checkAndSendFollowUps } from '@/lib/followup-service';
+import {
+  checkAndSendFollowUps,
+  checkAndSendPropertyFollowUps,
+} from '@/lib/followup-service';
 import {
   checkAndSendSiteVisitReminders,
+  checkAndSendPostSiteVisitFollowUps,
   markPastSiteVisitsPending,
 } from '@/lib/site-visit-reminder-service';
 
@@ -17,11 +21,22 @@ export async function GET(request) {
   try {
     console.log('🔄 Cron job triggered - Starting follow-up check...');
     const result = await checkAndSendFollowUps();
+    const propertyFollowUps = await checkAndSendPropertyFollowUps();
     const siteVisitStatusUpdates = await markPastSiteVisitsPending();
     const siteVisitReminders = await checkAndSendSiteVisitReminders();
+    const postSiteVisitFollowUps = await checkAndSendPostSiteVisitFollowUps();
 
-    if (!result.success || !siteVisitStatusUpdates.success || !siteVisitReminders.success) {
-      return NextResponse.json({ result, siteVisitStatusUpdates, siteVisitReminders }, { status: 400 });
+    if (
+      !result.success ||
+      !propertyFollowUps.success ||
+      !siteVisitStatusUpdates.success ||
+      !siteVisitReminders.success ||
+      !postSiteVisitFollowUps.success
+    ) {
+      return NextResponse.json(
+        { result, propertyFollowUps, siteVisitStatusUpdates, siteVisitReminders, postSiteVisitFollowUps },
+        { status: 400 }
+      );
     }
 
     console.log('✅ Cron job completed successfully');
@@ -29,8 +44,10 @@ export async function GET(request) {
       success: true,
       message: 'Follow-up and site visit reminder checks executed',
       result,
+      propertyFollowUps,
       siteVisitStatusUpdates,
       siteVisitReminders,
+      postSiteVisitFollowUps,
     });
   } catch (error) {
     console.error('❌ Cron job error:', error);

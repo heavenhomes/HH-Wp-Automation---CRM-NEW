@@ -65,7 +65,7 @@ export default function PropertiesPage() {
   const [editingProperty, setEditingProperty] = useState(null);
 
   // Filters
-  const [filterCity, setFilterCity] = useState('');
+  const [filterPropertyCode, setFilterPropertyCode] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [filterStatus, setFilterStatus] = useState('available');
   const [filterMinPrice, setFilterMinPrice] = useState('');
@@ -93,7 +93,7 @@ export default function PropertiesPage() {
         page: String(pagination.page),
         limit: String(pagination.limit),
       });
-      if (filterCity) params.set('city', filterCity);
+      if (filterPropertyCode) params.set('propertyCode', filterPropertyCode);
       if (filterCategory) params.set('category', filterCategory);
       if (filterStatus) params.set('status', filterStatus);
       if (filterMinPrice) params.set('minPrice', filterMinPrice);
@@ -125,7 +125,7 @@ export default function PropertiesPage() {
   }, [
     pagination.page,
     pagination.limit,
-    filterCity,
+    filterPropertyCode,
     filterCategory,
     filterStatus,
     filterMinPrice,
@@ -210,7 +210,7 @@ export default function PropertiesPage() {
   };
 
   const clearFilters = () => {
-    setFilterCity('');
+    setFilterPropertyCode('');
     setFilterCategory('');
     setFilterStatus('available');
     setFilterMinPrice('');
@@ -240,13 +240,13 @@ export default function PropertiesPage() {
   const anyFilterActive = useMemo(
     () =>
       Boolean(
-        filterCity ||
+        filterPropertyCode ||
           filterCategory ||
           filterStatus !== 'available' ||
           filterMinPrice ||
           filterMaxPrice
       ),
-    [filterCity, filterCategory, filterStatus, filterMinPrice, filterMaxPrice]
+    [filterPropertyCode, filterCategory, filterStatus, filterMinPrice, filterMaxPrice]
   );
 
   const formatPrice = (price, propertyType) => {
@@ -344,15 +344,15 @@ export default function PropertiesPage() {
           className="grid gap-3"
           style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}
         >
-          {/* City */}
+          {/* Property code */}
           <div className="relative">
-            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6a7f6a]" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6a7f6a]" />
             <input
               type="text"
-              placeholder="City (e.g., Indore)"
-              value={filterCity}
+              placeholder="Search by property code"
+              value={filterPropertyCode}
               onChange={(e) => {
-                setFilterCity(e.target.value);
+                setFilterPropertyCode(e.target.value);
                 setPagination((p) => ({ ...p, page: 1 }));
               }}
               className="w-full pl-9 pr-3 py-2.5 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"

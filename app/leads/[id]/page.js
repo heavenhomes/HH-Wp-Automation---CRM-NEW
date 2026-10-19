@@ -3,10 +3,17 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import ImageGalleryModal from '@/components/Properties/ImageGalleryModal';
+import TimePicker from '@/components/SiteVisits/TimePicker';
 import { useAuth } from '@/lib/auth/useAuth';
 import {
+  createLocalDateTime,
+  formatSiteVisitTime,
+  localDateInput,
+  siteVisitDateTimeParts,
+} from '@/lib/site-visit-time';
+import {
   ArrowLeft, Phone, MessageSquare,
-  Star, Building2, Image as ImageIcon,
+  Star, Building2, Image as ImageIcon, Pencil, Trash2,
   Bell, Calendar, UserRoundPen, Plus, X, Loader2, StickyNote,
 } from 'lucide-react';
 
@@ -150,6 +157,54 @@ export default function LeadDetailPage() {
   const [savingPersonalInfo, setSavingPersonalInfo] = useState(false);
   const [savingEnquiry, setSavingEnquiry] = useState(false);
   const [personalInfo, setPersonalInfo] = useState({ name: '', phone: '' });
+  const [partnerOptions, setPartnerOptions] = useState([]);
+  const [propertyOptions, setPropertyOptions] = useState([]);
+  const [siteVisitOpen, setSiteVisitOpen] = useState(false);
+  const [savingSiteVisit, setSavingSiteVisit] = useState(false);
+  const [siteVisitForm, setSiteVisitForm] = useState({ propertyId: '', date: '', time: '', notes: '' });
+  const [editingVisit, setEditingVisit] = useState(null);
+  const [deletingVisitId, setDeletingVisitId] = useState('');
+
+  useEffect(() => {
+    if (!user?.role) return;
+    let cancelled = false;
+    const fetchAvailableProperties = async () => {
+      const fetchPage = async (page) => {
+        const response = await fetch(`/api/properties?status=available&limit=200&page=${page}`);
+        const json = await response.json();
+        if (!response.ok || !json.success) throw new Error(json.error || 'Failed to load properties');
+        return json;
+      };
+      const firstPage = await fetchPage(1);
+      const remaining = await Promise.all(
+        Array.from({ length: Math.max(0, (firstPage.pagination?.pages || 1) - 1) }, (_, index) =>
+          fetchPage(index + 2)
+        )
+      );
+      return [firstPage, ...remaining].flatMap((result) => result.data || []);
+    };
+    Promise.all([
+      user.role === 'owner'
+        ? fetch('/api/team-members?role=channel_partner&active=true&limit=500').then(async (response) => {
+          const json = await response.json();
+          if (!response.ok || !json.success) throw new Error(json.error || 'Failed to load channel partners');
+          return json.data || [];
+        })
+        : Promise.resolve([]),
+      fetchAvailableProperties(),
+    ])
+      .then(([partners, properties]) => {
+        if (!cancelled) {
+          setPartnerOptions(partners);
+          setPropertyOptions(properties);
+        }
+      })
+      .catch((error) => {
+        console.error('[lead-detail] schedule options error:', error);
+        if (!cancelled) toast.error(error.message || 'Failed to load schedule options');
+      });
+    return () => { cancelled = true; };
+  }, [user?.role]);
 
   useEffect(() => {
     (async () => {
@@ -264,6 +319,98 @@ export default function LeadDetailPage() {
     }
   };
 
+  const saveSiteVisit = async (event) => {
+    event.preventDefault();
+    const scheduledDate = createLocalDateTime(siteVisitForm.date, siteVisitForm.time);
+    if (!scheduledDate || !siteVisitForm.propertyId) {
+      toast.error('Select a valid date and time');
+      return;
+    }
+    setSavingSiteVisit(true);
+    try {
+      const response = await fetch(`/api/leads/${lead._id}/site-visits`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          propertyId: siteVisitForm.propertyId,
+          scheduledDate: scheduledDate.toISOString(),
+          scheduledTime: formatSiteVisitTime(siteVisitForm.time),
+          notes: siteVisitForm.notes,
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json.success) throw new Error(json.error || 'Failed to schedule site visit');
+      setSubData((previous) => ({
+        ...previous,
+        visits: [json.data, ...previous.visits.filter((visit) => visit._id !== json.data._id)],
+      }));
+      setSiteVisitOpen(false);
+      setSiteVisitForm({ propertyId: '', date: '', time: '', notes: '' });
+      setActiveTab('visits');
+      setLead((previous) => ({ ...previous, currentStatus: 'site_visit_scheduled' }));
+      toast.success('Site visit scheduled');
+    } catch (error) {
+      toast.error(error.message || 'Failed to schedule site visit');
+    } finally {
+      setSavingSiteVisit(false);
+    }
+  };
+
+  const saveVisitEdit = async (event) => {
+    event.preventDefault();
+    if (!editingVisit) return;
+    const scheduledDate = createLocalDateTime(editingVisit.date, editingVisit.time);
+    if (!scheduledDate || !editingVisit.propertyId) {
+      toast.error('Select a valid date and time');
+      return;
+    }
+    setSavingSiteVisit(true);
+    try {
+      const response = await fetch(`/api/site-visits/${editingVisit._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          propertyId: editingVisit.propertyId,
+          scheduledDate: scheduledDate.toISOString(),
+          scheduledTime: formatSiteVisitTime(editingVisit.time),
+          status: editingVisit.status,
+          notes: editingVisit.notes,
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json.success) throw new Error(json.error || 'Failed to update site visit');
+      setSubData((previous) => ({
+        ...previous,
+        visits: previous.visits.map((visit) => visit._id === json.data._id ? json.data : visit),
+      }));
+      setEditingVisit(null);
+      toast.success('Site visit updated');
+    } catch (error) {
+      toast.error(error.message || 'Failed to update site visit');
+    } finally {
+      setSavingSiteVisit(false);
+    }
+  };
+
+  const deleteSiteVisit = async (visit) => {
+    if (!confirm('Delete this site visit? This cannot be undone.')) return;
+    setDeletingVisitId(visit._id);
+    try {
+      const response = await fetch(`/api/site-visits/${visit._id}`, { method: 'DELETE' });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json.success) throw new Error(json.error || 'Failed to delete site visit');
+      setSubData((previous) => ({
+        ...previous,
+        visits: previous.visits.filter((item) => item._id !== visit._id),
+      }));
+      toast.success('Site visit deleted');
+    } catch (error) {
+      toast.error(error.message || 'Failed to delete site visit');
+    } finally {
+      setDeletingVisitId('');
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-[#f8faf7]">
@@ -325,6 +472,15 @@ export default function LeadDetailPage() {
               >
                 <Plus className="h-4 w-4" /> Add Inquiry
               </button>
+              {user?.role === 'owner' && (
+                <button
+                  type="button"
+                  onClick={() => setSiteVisitOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-xl border border-[#d8e7d5] bg-white px-3 py-2 text-sm font-medium text-[#2d7a3a] hover:bg-[#f0f7ef]"
+                >
+                  <Calendar className="h-4 w-4" /> Schedule Site Visit
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -359,6 +515,29 @@ export default function LeadDetailPage() {
             onSave={saveEnquiry}
           />
         )}
+        {siteVisitOpen && (
+          <SiteVisitModal
+            title="Schedule Site Visit"
+            form={siteVisitForm}
+            properties={propertyOptions}
+            saving={savingSiteVisit}
+            onChange={setSiteVisitForm}
+            onClose={() => setSiteVisitOpen(false)}
+            onSubmit={saveSiteVisit}
+          />
+        )}
+        {editingVisit && (
+          <SiteVisitModal
+            title="Edit Site Visit"
+            form={editingVisit}
+            properties={propertyOptions}
+            saving={savingSiteVisit}
+            editing
+            onChange={setEditingVisit}
+            onClose={() => setEditingVisit(null)}
+            onSubmit={saveVisitEdit}
+          />
+        )}
       </div>
 
       {/* Info card */}
@@ -366,9 +545,20 @@ export default function LeadDetailPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           <Field label="Name" value={lead.name} />
           <Field label="Contact Number" value={lead.phone} />
-          <Field label="Preferred Site Visit" value={formatDateTime(lead.siteVisit)} />
-          <Field label="Assigned To">
-            {lead.assignedTo ? (
+          
+          <Field label={user?.role === 'owner' ? 'Assign Channel Partner' : 'Channel Partner'}>
+            {user?.role === 'owner' ? (
+              <select
+                value={lead.assignedTo || ''}
+                onChange={(event) => updateLead({ assignedTo: event.target.value })}
+                className="w-full px-2 py-1 border border-[#e8f0e6] rounded-lg text-sm bg-[#fafffa] focus:outline-none focus:border-[#2d7a3a]"
+              >
+                <option value="">Unassigned</option>
+                {partnerOptions.map((partner) => (
+                  <option key={partner._id} value={partner.name}>{partner.name}</option>
+                ))}
+              </select>
+            ) : lead.assignedTo ? (
               <p className="text-sm font-medium text-[#1a2e1a] break-words">
                 {lead.assignedTo}
               </p>
@@ -443,7 +633,20 @@ export default function LeadDetailPage() {
             {activeTab === 'followups' && (
               <FollowUpsTab data={subData.followUps} />
             )}
-            {activeTab === 'visits' && <VisitsTab visits={subData.visits} />}
+            {activeTab === 'visits' && (
+              <VisitsTab
+                visits={subData.visits}
+                isOwner={user?.role === 'owner'}
+                deletingVisitId={deletingVisitId}
+                onEdit={(visit) => setEditingVisit({
+                  ...visit,
+                  date: localDateInput(visit.scheduledDate),
+                  time: formatSiteVisitTime(visit.scheduledTime, visit.scheduledDate),
+                  propertyId: String(visit.property?._id || visit.property || ''),
+                })}
+                onDelete={deleteSiteVisit}
+              />
+            )}
             {activeTab === 'notes' && (
               <NotesTab
                 leadId={lead._id}
@@ -517,6 +720,7 @@ function ManualEnquiryModal({ lead, saving, onClose, onSave }) {
       ? lead.purchaseType
       : '';
     const rentOption = FORM_RENT_BUDGETS.find(([, label]) => label === lead.rentBudgetLabel)?.[0] || '';
+    const preferredVisit = siteVisitDateTimeParts(lead.siteVisit);
     return {
       area: lead.area === 'Not provided' ? '' : (lead.area || ''),
       propertyCategory: FORM_CATEGORIES.some((item) => item.value === lead.propertyCategory) ? lead.propertyCategory : '',
@@ -528,7 +732,8 @@ function ManualEnquiryModal({ lead, saving, onClose, onSave }) {
       timeline: lead.timeline || '',
       furnishing: lead.furnishing === 'Not provided' ? '' : (lead.furnishing || ''),
       investmentType: lead.investmentType === 'Not provided' ? '' : (lead.investmentType || ''),
-      siteVisit: toLocalDateTime(lead.siteVisit),
+      siteVisitDate: preferredVisit.date,
+      siteVisitTime: preferredVisit.time,
       spaceSize: lead.spaceSize || '',
       interested: typeof lead.interested === 'object' && lead.interested ? lead.interested._id : (lead.interested || ''),
     };
@@ -632,7 +837,7 @@ function ManualEnquiryModal({ lead, saving, onClose, onSave }) {
     if (!isRent && !form.investmentType) return toast.error('Select a buying plan');
     onSave({
       ...form,
-      siteVisit: form.siteVisit ? new Date(form.siteVisit).toISOString() : '',
+      siteVisit: createLocalDateTime(form.siteVisitDate, form.siteVisitTime)?.toISOString() || '',
     });
   };
 
@@ -719,7 +924,18 @@ function ManualEnquiryModal({ lead, saving, onClose, onSave }) {
           )}
           {form.purchaseType && (
             <FormField label="Preferred Site Visit Date and Time (optional)">
-              <input type="datetime-local" value={form.siteVisit} onChange={(event) => updateForm('siteVisit', event.target.value)} className={inputClass} />
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <input
+                  type="date"
+                  value={form.siteVisitDate}
+                  onChange={(event) => updateForm('siteVisitDate', event.target.value)}
+                  className={inputClass}
+                />
+                <TimePicker
+                  value={form.siteVisitTime}
+                  onChange={(time) => updateForm('siteVisitTime', time)}
+                />
+              </div>
             </FormField>
           )}
           {criteriaReady && (
@@ -735,14 +951,6 @@ function ManualEnquiryModal({ lead, saving, onClose, onSave }) {
       </form>
     </div>
   );
-}
-
-function toLocalDateTime(value) {
-  if (!value) return '';
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return '';
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 16);
 }
 
 function NotesTab({ leadId, notes, onNotesChange }) {
@@ -1224,28 +1432,31 @@ function FollowUpsTab({ data }) {
 }
 
 /* ---------- Site Visits — now a table ---------- */
-function VisitsTab({ visits }) {
+function VisitsTab({ visits, isOwner, deletingVisitId, onEdit, onDelete }) {
   if (!visits?.length) return <Empty icon={Calendar} text="No site visits yet" />;
 
   return (
     <div className="overflow-x-auto -mx-4 md:mx-0">
-      <table className="w-full min-w-[640px]">
+      <table className="w-full min-w-[900px]">
         <thead>
           <tr className="bg-[#fafffa] border-b border-[#e8f0e6]">
             <th className="text-left px-4 py-3 text-xs font-medium text-[#6a7f6a] uppercase tracking-wider">
               Property
             </th>
             <th className="text-left px-4 py-3 text-xs font-medium text-[#6a7f6a] uppercase tracking-wider">
-              Date
-            </th>
-            <th className="text-left px-4 py-3 text-xs font-medium text-[#6a7f6a] uppercase tracking-wider">
-              Time
+              Date &amp; Time
             </th>
             <th className="text-left px-4 py-3 text-xs font-medium text-[#6a7f6a] uppercase tracking-wider">
               Channel Partner
             </th>
             <th className="text-left px-4 py-3 text-xs font-medium text-[#6a7f6a] uppercase tracking-wider">
               Status
+            </th>
+            <th className="text-left px-4 py-3 text-xs font-medium text-[#6a7f6a] uppercase tracking-wider">
+              Note
+            </th>
+            <th className="text-right px-4 py-3 text-xs font-medium text-[#6a7f6a] uppercase tracking-wider">
+              Action
             </th>
           </tr>
         </thead>
@@ -1259,10 +1470,8 @@ function VisitsTab({ visits }) {
                 {v.property?.title || v.propertyTitle || '—'}
               </td>
               <td className="px-4 py-3 text-sm text-[#4f6b4f]">
-                {formatDate(v.scheduledDate)}
-              </td>
-              <td className="px-4 py-3 text-sm text-[#4f6b4f]">
-                {v.scheduledTime || formatTime12h(v.scheduledDate)}
+                <div>{formatDate(v.scheduledDate)}</div>
+                <div className="text-xs text-[#6a7f6a]">{formatSiteVisitTime(v.scheduledTime, v.scheduledDate) || formatTime12h(v.scheduledDate)}</div>
               </td>
               <td className="px-4 py-3 text-sm text-[#4f6b4f]">
                 {v.channelPartnerName || '—'}
@@ -1270,10 +1479,116 @@ function VisitsTab({ visits }) {
               <td className="px-4 py-3">
                 <VisitStatusBadge status={v.status} />
               </td>
+              <td className="px-4 py-3 text-sm text-[#4f6b4f] whitespace-pre-wrap">
+                {v.notes || '—'}
+              </td>
+              <td className="px-4 py-3 text-right">
+                <div className="inline-flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    aria-label="Edit site visit"
+                    title="Edit site visit"
+                    onClick={() => onEdit(v)}
+                    className="rounded-lg border border-[#e8f0e6] p-2 text-[#2d7a3a] hover:bg-[#f0f7ef]"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  {isOwner && (
+                    <button
+                      type="button"
+                      aria-label="Delete site visit"
+                      title="Delete site visit"
+                      disabled={deletingVisitId === v._id}
+                      onClick={() => onDelete(v)}
+                      className="rounded-lg border border-[#f4d0d0] p-2 text-[#c0392b] hover:bg-[#fde8e8] disabled:opacity-50"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function SiteVisitModal({ title, form, properties, saving, editing, onChange, onClose, onSubmit }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <form
+        onSubmit={onSubmit}
+        className="w-[calc(100%-2rem)] max-w-md rounded-2xl bg-white shadow-xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <ModalHeader title={title} onClose={onClose} />
+        <div className="space-y-4 p-5">
+          <FormField label="Property">
+            <select
+              required
+              value={form.propertyId || ''}
+              onChange={(event) => onChange((previous) => ({ ...previous, propertyId: event.target.value }))}
+              className={inputClass}
+            >
+              <option value="">Select a property</option>
+              {properties.map((property) => (
+                <option key={property._id} value={property._id}>
+                  {property.title} · {property.propertyId}
+                </option>
+              ))}
+            </select>
+          </FormField>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <FormField label="Date">
+              <input
+                required
+                type="date"
+                value={form.date || ''}
+                onChange={(event) => onChange((previous) => ({ ...previous, date: event.target.value }))}
+                className={inputClass}
+              />
+            </FormField>
+            <FormField label="Time">
+              <TimePicker
+                required
+                value={form.time || ''}
+                onChange={(time) => onChange((previous) => ({ ...previous, time }))}
+              />
+            </FormField>
+          </div>
+          {editing && (
+            <FormField label="Site Visit Status">
+              <select
+                value={form.status || 'scheduled'}
+                onChange={(event) => onChange((previous) => ({ ...previous, status: event.target.value }))}
+                className={inputClass}
+              >
+                <option value="scheduled">Scheduled</option>
+                <option value="pending">Pending</option>
+                <option value="completed">Completed</option>
+                <option value="rescheduled">Rescheduled</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </FormField>
+          )}
+          <FormField label={editing ? 'Additional Note' : 'Note'}>
+            <textarea
+              rows={3}
+              maxLength={2000}
+              value={form.notes || ''}
+              onChange={(event) => onChange((previous) => ({ ...previous, notes: event.target.value }))}
+              className={`${inputClass} resize-y`}
+            />
+          </FormField>
+        </div>
+        <ModalFooter
+          onCancel={onClose}
+          saving={saving}
+          submitLabel={editing ? 'Save Changes' : 'Schedule Site Visit'}
+        />
+      </form>
     </div>
   );
 }

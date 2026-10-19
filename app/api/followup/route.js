@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import {
   checkAndSendFollowUps,
+  checkAndSendPropertyFollowUps,
   getFollowUpStatus,
   sendFollowUpToLead,
 } from '@/lib/followup-service';
@@ -22,7 +23,13 @@ export async function POST(request) {
 
     if (action === 'check_and_followup') {
       const result = await checkAndSendFollowUps();
-      return NextResponse.json({ success: true, message: 'Follow-ups processed', ...result });
+      const propertyFollowUps = await checkAndSendPropertyFollowUps();
+      return NextResponse.json({
+        success: result.success && propertyFollowUps.success,
+        message: 'Follow-ups processed',
+        ...result,
+        propertyFollowUps,
+      });
     }
 
     if (action === 'send_to_single_lead' && phone) {

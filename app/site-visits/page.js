@@ -1,37 +1,45 @@
 "use client";
 import { useAuth } from '@/lib/auth/useAuth';
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import TimePicker from '@/components/SiteVisits/TimePicker';
+import {
+  createLocalDateTime,
+  formatSiteVisitTime,
+  localDateInput,
+} from '@/lib/site-visit-time';
 import toast from 'react-hot-toast';
 import {
   Calendar,
   Clock,
   CheckCircle,
-  RefreshCw,
   Search,
   Pencil,
   Trash2,
   Phone,
   FolderOpen,
-  XCircle,
   Plus,
 } from 'lucide-react';
 
-const STATUS_TABS = [
-  { value: 'scheduled',   label: 'Scheduled',   icon: Calendar },
-  { value: 'pending',     label: 'Pending',     icon: Clock },
-  { value: 'completed',   label: 'Completed',   icon: CheckCircle },
-  { value: 'rescheduled', label: 'Rescheduled', icon: RefreshCw },
-  { value: 'cancelled',   label: 'Cancelled',   icon: XCircle },
+const STATUS_FILTERS = [
+  { value: 'all', label: 'All' },
+  { value: 'today', label: 'Today' },
+  { value: 'scheduled', label: 'Scheduled' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'rescheduled', label: 'Rescheduled' },
+  { value: 'cancelled', label: 'Cancelled' },
 ];
 
 export default function SiteVisitsPage() {
   const { isOwner } = useAuth();
+  const router = useRouter();
   const [visits, setVisits] = useState([]);
   const [stats, setStats] = useState({ total: 0, today: 0, pending: 0, completed: 0 });
   const [loading, setLoading] = useState(true);
-  const [activeStatus, setActiveStatus] = useState('scheduled');
+  const [activeStatus, setActiveStatus] = useState('today');
   const [search, setSearch] = useState('');
-  const [dateFilter, setDateFilter] = useState('all');
+  const [filterProperty, setFilterProperty] = useState('');
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ total: 0, pages: 1 });
   const [editing, setEditing] = useState(null);
@@ -90,6 +98,19 @@ export default function SiteVisitsPage() {
     };
   }, [addingVisit]);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetchAllOptions('/api/properties?status=available&limit=200')
+      .then((properties) => {
+        if (!cancelled) setPropertyOptions(properties);
+      })
+      .catch((error) => {
+        console.error('[site-visits] property filter options error:', error);
+        if (!cancelled) toast.error(error.message || 'Failed to load properties');
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   const fetchStats = async () => {
     try {
       const res = await fetch('/api/site-visits/stats');
@@ -108,12 +129,19 @@ export default function SiteVisitsPage() {
     setLoading(true);
     try {
       const params = new URLSearchParams({
-        status: activeStatus,
+        status: activeStatus === 'today' ? 'all' : activeStatus,
         page: String(page),
         limit: '20',
       });
-      if (search) params.set('search', search);
-      if (dateFilter === 'today') {
+      const trimmedSearch = search.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmedSearch)) {
+        params.set('scheduledDate', trimmedSearch);
+        params.set('timezoneOffset', String(new Date().getTimezoneOffset()));
+      } else if (trimmedSearch) {
+        params.set('search', trimmedSearch);
+      }
+      if (filterProperty) params.set('propertyId', filterProperty);
+      if (activeStatus === 'today' && !/^\d{4}-\d{2}-\d{2}$/.test(trimmedSearch)) {
         const now = new Date();
         const dateKey = [
           now.getFullYear(),
@@ -147,7 +175,7 @@ export default function SiteVisitsPage() {
   useEffect(() => {
     fetchVisits();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeStatus, page, dateFilter]);
+  }, [activeStatus, page, search, filterProperty]);
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this site visit?')) return;
@@ -168,14 +196,24 @@ export default function SiteVisitsPage() {
 
   const handleSaveEdit = async () => {
     if (!editing) return;
+    if (!editing.propertyId) {
+      toast.error('Select a property');
+      return;
+    }
+    const visitDate = createLocalDateTime(editing.scheduledDate, editing.scheduledTimeInput);
+    if (!visitDate) {
+      toast.error('Select a valid date and time');
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetch(`/api/site-visits/${editing._id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          scheduledDate: editing.scheduledDate,
-          scheduledTime: editing.scheduledTime,
+          scheduledDate: visitDate.toISOString(),
+          scheduledTime: formatSiteVisitTime(editing.scheduledTimeInput),
+          propertyId: editing.propertyId,
           status: editing.status,
           notes: editing.notes,
         }),
@@ -199,8 +237,8 @@ export default function SiteVisitsPage() {
 
   const handleAddVisit = async (event) => {
     event.preventDefault();
-    const visitDate = new Date(`${newVisit.date}T${newVisit.time}`);
-    if (!Number.isFinite(visitDate.getTime())) {
+    const visitDate = createLocalDateTime(newVisit.date, newVisit.time);
+    if (!visitDate) {
       toast.error('Select a valid date and time');
       return;
     }
@@ -214,11 +252,7 @@ export default function SiteVisitsPage() {
           leadId: newVisit.leadId,
           propertyId: newVisit.propertyId,
           scheduledDate: visitDate.toISOString(),
-          scheduledTime: visitDate.toLocaleTimeString('en-US', {
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true,
-          }),
+          scheduledTime: formatSiteVisitTime(newVisit.time),
         }),
       });
       const json = await response.json().catch(() => ({}));
@@ -239,14 +273,7 @@ export default function SiteVisitsPage() {
     }
   };
 
-  const isMachineDateTime = (value) =>
-    typeof value === 'string' &&
-    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value);
-
   const renderDateCell = (v) => {
-    if (v.rawPreferredDateTime && !isMachineDateTime(v.rawPreferredDateTime)) {
-      return v.rawPreferredDateTime;
-    }
     if (v.scheduledDate)
       return new Date(v.scheduledDate).toLocaleDateString('en-US', {
         weekday: 'short',
@@ -258,7 +285,10 @@ export default function SiteVisitsPage() {
   };
 
   const renderTimeCell = (v) => {
-    if (v.scheduledTime) return v.scheduledTime;
+    if (v.scheduledTime) {
+      const formatted = formatSiteVisitTime(v.scheduledTime, v.scheduledDate);
+      if (formatted) return formatted;
+    }
     if (v.scheduledDate)
       return new Date(v.scheduledDate).toLocaleTimeString('en-US', {
         hour: 'numeric',
@@ -282,14 +312,16 @@ export default function SiteVisitsPage() {
               Track and manage all property site visits
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setAddingVisit(true)}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-[#2d7a3a] hover:bg-[#23682e] rounded-xl shadow-sm transition-colors w-fit"
-          >
-            <Plus className="w-4 h-4" />
-            Add Site Visit
-          </button>
+          {isOwner && (
+            <button
+              type="button"
+              onClick={() => setAddingVisit(true)}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-[#2d7a3a] hover:bg-[#23682e] rounded-xl shadow-sm transition-colors w-fit"
+            >
+              <Plus className="w-4 h-4" />
+              Add Site Visit
+            </button>
+          )}
         </div>
       </div>
 
@@ -302,65 +334,49 @@ export default function SiteVisitsPage() {
           gap: '0.75rem',
         }}
       >
-        <KpiCard icon={Calendar} label="Today's Site Visits" value={stats.today} tone="blue" />
-        <KpiCard icon={Clock} label="Pending Site Visits" value={stats.pending} tone="amber" />
-        <KpiCard icon={CheckCircle} label="Completed Site Visits" value={stats.completed} tone="green" />
+        <KpiCard icon={Calendar} label="Today's Site Visits" value={stats.today} tone="blue" onClick={() => { setActiveStatus('today'); setPage(1); }} active={activeStatus === 'today'} />
+        <KpiCard icon={Clock} label="Pending Site Visits" value={stats.pending} tone="amber" onClick={() => { setActiveStatus('pending'); setPage(1); }} active={activeStatus === 'pending'} />
+        <KpiCard icon={CheckCircle} label="Completed Site Visits" value={stats.completed} tone="green" onClick={() => { setActiveStatus('completed'); setPage(1); }} active={activeStatus === 'completed'} />
       </div>
 
       {/* Tabs + Search */}
       <div className="bg-white rounded-2xl border border-[#e8f0e6] p-3 sm:p-4 mb-6 shadow-sm">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-          <div className="flex gap-1 overflow-x-auto pb-1 lg:pb-0 -mx-1 px-1">
-            {STATUS_TABS.map(({ value, label, icon: Icon }) => {
-              const isActive = activeStatus === value;
-              return (
-                <button
-                  key={value}
-                  onClick={() => { setActiveStatus(value); setPage(1); }}
-                  className={`inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium whitespace-nowrap transition-colors ${
-                    isActive
-                      ? 'bg-[#2d7a3a] text-white shadow-sm'
-                      : 'text-[#4f6b4f] hover:bg-[#f0f7ef]'
-                  }`}
-                >
-                  <Icon className="w-4 h-4" />
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flex w-full flex-col gap-2 sm:flex-row lg:w-auto lg:flex-shrink-0">
-          <button
-            type="button"
-            aria-pressed={dateFilter === 'today'}
-            onClick={() => {
-              setDateFilter((current) => current === 'today' ? 'all' : 'today');
-              setPage(1);
-            }}
-            className={`inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
-              dateFilter === 'today'
-                ? 'border-[#2d7a3a] bg-[#2d7a3a] text-white'
-                : 'border-[#e8f0e6] bg-[#fafffa] text-[#4f6b4f] hover:bg-[#f0f7ef]'
-            }`}
-          >
-            <Calendar className="h-4 w-4" />
-            {dateFilter === 'today' ? "Today's Visits" : 'Today'}
-          </button>
-          <div className="relative w-full sm:min-w-64 lg:w-72">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="relative min-w-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6a7f6a]" />
             <input
               type="text"
-              placeholder="Search by lead, phone, property..."
+              placeholder="Search by lead, phone, or date (YYYY-MM-DD)..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') { setPage(1); fetchVisits(); }
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
               }}
               className="w-full pl-9 pr-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
             />
           </div>
-          </div>
+          <select
+            value={filterProperty}
+            onChange={(event) => { setFilterProperty(event.target.value); setPage(1); }}
+            className="w-full min-w-0 px-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
+          >
+            <option value="">All active properties</option>
+            {propertyOptions.map((property) => (
+              <option key={property._id} value={property._id}>
+                {property.title} · {property.propertyId}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Filter site visits by status"
+            value={activeStatus}
+            onChange={(event) => { setActiveStatus(event.target.value); setPage(1); }}
+            className="w-full min-w-0 px-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
+          >
+            {STATUS_FILTERS.map(({ value, label }) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -398,7 +414,11 @@ export default function SiteVisitsPage() {
                 </tr>
               ) : (
                 visits.map((v) => (
-                  <tr key={v._id} className="border-t border-[#eef5ec] hover:bg-[#fafffa] transition-colors">
+                  <tr
+                    key={v._id}
+                    onClick={() => router.push(`/leads/${v.lead}`)}
+                    className="border-t border-[#eef5ec] hover:bg-[#fafffa] transition-colors cursor-pointer"
+                  >
                     <td className="px-5 py-3">
                       <p className="text-sm font-medium text-[#1a2e1a]">{v.leadName || 'Unknown'}</p>
                       <p className="text-xs text-[#6a7f6a] flex items-center gap-1 mt-0.5">
@@ -413,11 +433,9 @@ export default function SiteVisitsPage() {
                     </td>
                     <td className="px-5 py-3">
                       <p className="text-sm text-[#4f6b4f]">{renderDateCell(v)}</p>
-                      {(!v.rawPreferredDateTime || isMachineDateTime(v.rawPreferredDateTime)) && (
-                        <p className="text-xs text-[#6a7f6a] flex items-center gap-1 mt-0.5">
-                          <Clock className="w-3 h-3" /> {renderTimeCell(v)}
-                        </p>
-                      )}
+                      <p className="text-xs text-[#6a7f6a] flex items-center gap-1 mt-0.5">
+                        <Clock className="w-3 h-3" /> {renderTimeCell(v)}
+                      </p>
                     </td>
                     <td className="px-5 py-3">
                       <span className="text-sm text-[#4f6b4f]">
@@ -428,12 +446,15 @@ export default function SiteVisitsPage() {
                     <td className="px-5 py-3">
                       <div className="flex items-center justify-end gap-1.5">
                         <button
-                          onClick={() =>
+                          onClick={(event) => {
+                            event.stopPropagation();
                             setEditing({
                               ...v,
-                              scheduledDate: v.scheduledDate?.slice(0, 10),
-                            })
-                          }
+                              scheduledDate: v.scheduledDate ? localDateInput(v.scheduledDate) : '',
+                              scheduledTimeInput: formatSiteVisitTime(v.scheduledTime, v.scheduledDate),
+                              propertyId: String(v.property || ''),
+                            });
+                          }}
                           title="Edit"
                           className="p-1.5 rounded-lg border border-[#e8f0e6] hover:bg-[#f0f7ef] hover:border-[#2d7a3a] transition-colors group"
                         >
@@ -441,7 +462,7 @@ export default function SiteVisitsPage() {
                         </button>
                         {isOwner && (
                           <button
-                            onClick={() => handleDelete(v._id)}
+                            onClick={(event) => { event.stopPropagation(); handleDelete(v._id); }}
                             title="Delete"
                             className="p-1.5 rounded-lg border border-[#e8f0e6] hover:bg-[#fde8e8] hover:border-[#c0392b] transition-colors group"
                           >
@@ -471,12 +492,25 @@ export default function SiteVisitsPage() {
             </div>
           ) : (
             visits.map((v) => (
-              <div key={v._id} className="p-4 space-y-2.5">
+              <div
+                key={v._id}
+                role="link"
+                tabIndex={0}
+                onClick={() => router.push(`/leads/${v.lead}`)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') router.push(`/leads/${v.lead}`);
+                }}
+                className="p-4 space-y-2.5 cursor-pointer hover:bg-[#fafffa]"
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-[#1a2e1a] truncate">
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/leads/${v.lead}`)}
+                      className="text-left text-sm font-semibold text-[#1a2e1a] truncate hover:text-[#2d7a3a]"
+                    >
                       {v.leadName || 'Unknown'}
-                    </p>
+                    </button>
                     <p className="text-xs text-[#6a7f6a] flex items-center gap-1 mt-0.5">
                       <Phone className="w-3 h-3" /> {v.leadPhone || '—'}
                     </p>
@@ -507,16 +541,22 @@ export default function SiteVisitsPage() {
 
                 <div className="flex items-center gap-2 pt-2 border-t border-[#eef5ec]">
                   <button
-                    onClick={() =>
-                      setEditing({ ...v, scheduledDate: v.scheduledDate?.slice(0, 10) })
-                    }
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setEditing({
+                        ...v,
+                        scheduledDate: v.scheduledDate ? localDateInput(v.scheduledDate) : '',
+                        scheduledTimeInput: formatSiteVisitTime(v.scheduledTime, v.scheduledDate),
+                        propertyId: String(v.property || ''),
+                      });
+                    }}
                     className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-[#2d7a3a] bg-[#e8f5e6] rounded-lg"
                   >
                     <Pencil className="w-3.5 h-3.5" /> Edit
                   </button>
                   {isOwner && (
                     <button
-                      onClick={() => handleDelete(v._id)}
+                      onClick={(event) => { event.stopPropagation(); handleDelete(v._id); }}
                       className="p-2 text-[#c0392b] bg-[#fde8e8] rounded-lg"
                       aria-label="Delete"
                     >
@@ -584,15 +624,28 @@ export default function SiteVisitsPage() {
                   />
                 </Field>
                 <Field label="Time">
-                  <input
-                    type="text"
-                    placeholder="e.g., 11:00 AM"
-                    value={editing.scheduledTime || ''}
-                    onChange={(e) => setEditing((p) => ({ ...p, scheduledTime: e.target.value }))}
-                    className="w-full px-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
+                  <TimePicker
+                    required
+                    value={editing.scheduledTimeInput || ''}
+                    onChange={(time) => setEditing((p) => ({ ...p, scheduledTimeInput: time }))}
                   />
                 </Field>
               </div>
+
+              <Field label="Property">
+                <select
+                  value={editing.propertyId || ''}
+                  onChange={(event) => setEditing((previous) => ({ ...previous, propertyId: event.target.value }))}
+                  className="w-full px-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
+                >
+                  <option value="">Select an active property</option>
+                  {propertyOptions.map((property) => (
+                    <option key={property._id} value={property._id}>
+                      {property.title} · {property.propertyId}
+                    </option>
+                  ))}
+                </select>
+              </Field>
 
               <Field label="Channel Partner">
                 <div className="w-full px-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#f0f7ef] text-[#4f6b4f]">
@@ -648,7 +701,7 @@ export default function SiteVisitsPage() {
         </div>
       )}
 
-      {addingVisit && (
+      {isOwner && addingVisit && (
         <div
           className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4"
           style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)', backdropFilter: 'blur(4px)' }}
@@ -719,13 +772,11 @@ export default function SiteVisitsPage() {
                   />
                 </Field>
                 <Field label="Time">
-                  <input
-                    type="time"
+                  <TimePicker
                     required
                     value={newVisit.time}
-                    onChange={(event) => setNewVisit((current) => ({ ...current, time: event.target.value }))}
+                    onChange={(time) => setNewVisit((current) => ({ ...current, time }))}
                     disabled={savingNewVisit}
-                    className="w-full px-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
                   />
                 </Field>
               </div>
@@ -757,7 +808,7 @@ export default function SiteVisitsPage() {
 
 /* -------------------- Small components -------------------- */
 
-function KpiCard({ icon: Icon, label, value, tone }) {
+function KpiCard({ icon: Icon, label, value, tone, onClick, active }) {
   const tones = {
     blue:  { bg: 'bg-[#e6f0fb]', fg: 'text-[#2a6ba8]' },
     amber: { bg: 'bg-[#fef7e0]', fg: 'text-[#b68b40]' },
@@ -766,7 +817,14 @@ function KpiCard({ icon: Icon, label, value, tone }) {
   const t = tones[tone] || tones.green;
 
   return (
-    <div className="bg-white rounded-2xl border border-[#e8f0e6] p-4 sm:p-5 shadow-sm hover:shadow-md transition-shadow">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`w-full text-left bg-white rounded-2xl border p-4 sm:p-5 shadow-sm hover:shadow-md transition-shadow ${
+        active ? 'border-[#2d7a3a] ring-2 ring-[#2d7a3a]/15' : 'border-[#e8f0e6]'
+      }`}
+    >
       <div className="flex items-center gap-3 sm:gap-4">
         <div className={`w-10 h-10 sm:w-11 sm:h-11 ${t.bg} rounded-xl flex items-center justify-center flex-shrink-0`}>
           <Icon className={`w-4 h-4 sm:w-5 sm:h-5 ${t.fg}`} />
@@ -776,7 +834,7 @@ function KpiCard({ icon: Icon, label, value, tone }) {
           <p className="text-xl sm:text-2xl font-bold text-[#1a2e1a] leading-tight mt-0.5">{value}</p>
         </div>
       </div>
-    </div>
+    </button>
   );
 }
 

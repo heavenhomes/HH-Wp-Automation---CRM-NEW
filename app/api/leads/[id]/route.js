@@ -4,6 +4,8 @@ import Property from '@/lib/models/Property';
 import { logActivity } from '@/lib/activity/log';
 import mongoose from 'mongoose';
 import { NextResponse } from 'next/server';
+import { verifySessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
+import SiteVisit from '@/lib/models/SiteVisit';
 
 const ALLOWED_LEAD_FIELDS = [
   'phone', 'phoneNumber', 'email', 'name', 'city', 'area',
@@ -119,7 +121,12 @@ export async function PUT(request, { params }) {
     } catch {
       return NextResponse.json({ error: 'Invalid or empty JSON body' }, { status: 400 });
     }
-console.log('[lead PUT] raw body:', JSON.stringify(body));
+    if (body.assignedTo !== undefined) {
+      const session = verifySessionToken(request.cookies.get(SESSION_COOKIE_NAME)?.value);
+      if (session?.role !== 'owner') {
+        return NextResponse.json({ error: 'Only the owner can assign channel partners' }, { status: 403 });
+      }
+    }
     const existing = await Lead.findById(id).lean();
     if (!existing) return NextResponse.json({ error: 'Lead not found' }, { status: 404 });
 
@@ -232,6 +239,10 @@ if (Object.keys(changes).length > 0) {
 // ---------------------------------------------------------------------------
 export async function DELETE(request, { params }) {
   try {
+    const session = verifySessionToken(request.cookies.get(SESSION_COOKIE_NAME)?.value);
+    if (session?.role !== 'owner') {
+      return NextResponse.json({ error: 'Only the owner can delete leads' }, { status: 403 });
+    }
     if (!isDbConnected()) {
       const conn = await dbConnect();
       if (!conn) return NextResponse.json({ error: 'DB unavailable' }, { status: 503 });
@@ -243,8 +254,10 @@ export async function DELETE(request, { params }) {
     }
   
 
-    const lead = await Lead.findByIdAndDelete(id);
+    const lead = await Lead.findById(id);
     if (!lead) return NextResponse.json({ error: 'Lead not found' }, { status: 404 });
+    await SiteVisit.deleteMany({ lead: lead._id });
+    await Lead.deleteOne({ _id: lead._id });
    await logActivity(request, {
   action: 'lead.deleted',
   category: 'lead',

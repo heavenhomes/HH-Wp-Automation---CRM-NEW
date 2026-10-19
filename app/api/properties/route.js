@@ -39,6 +39,7 @@ export async function GET(request) {
     const skip = (page - 1) * limit;
 
     const city = searchParams.get('city');
+    const propertyCode = searchParams.get('propertyCode')?.trim();
     const area = searchParams.get('area');
     const category = searchParams.get('category');
     const propertySubType = searchParams.get('propertySubType');
@@ -53,6 +54,7 @@ export async function GET(request) {
     else if (!status) query.status = 'available';
 
     if (city) query.city = { $regex: escapeRegex(city), $options: 'i' };
+    if (propertyCode) query.propertyId = { $regex: escapeRegex(propertyCode), $options: 'i' };
     if (area) query.area = { $regex: `^${escapeRegex(area)}$`, $options: 'i' };
 
     if (category) {

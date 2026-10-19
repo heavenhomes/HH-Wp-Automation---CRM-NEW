@@ -33,7 +33,7 @@ export default function LeadAssignmentPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
-  const [filterCity, setFilterCity] = useState('');
+  const [filterPartner, setFilterPartner] = useState('');
   const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 20, pages: 0 });
 
   // Assign modal
@@ -50,8 +50,9 @@ export default function LeadAssignmentPage() {
         page: String(pagination.page),
         limit: String(pagination.limit),
       });
+      if (searchTerm.trim()) params.set('search', searchTerm.trim());
       if (filterStatus) params.set('currentStatus', filterStatus);
-      if (filterCity) params.set('city', filterCity);
+      if (filterPartner) params.set('assignedTo', filterPartner);
 
       const res = await fetch(`/api/leads?${params}`);
       const json = await res.json();
@@ -65,7 +66,7 @@ export default function LeadAssignmentPage() {
       console.error(err);
       toast.error('Failed to fetch leads');
     } finally { setLoading(false); }
-  }, [pagination.page, pagination.limit, filterStatus, filterCity]);
+  }, [pagination.page, pagination.limit, filterStatus, filterPartner, searchTerm]);
 
   const fetchAllLeadsForModal = useCallback(async () => {
     try {
@@ -159,17 +160,7 @@ export default function LeadAssignmentPage() {
   };
 
   // ---------- Derived ----------
-  const filteredLeads = leads.filter((lead) => {
-    if (!searchTerm) return true;
-    const q = searchTerm.toLowerCase();
-    return (
-      lead.name?.toLowerCase().includes(q) ||
-      lead.phone?.includes(q) ||
-      lead.city?.toLowerCase().includes(q) ||
-      lead.area?.toLowerCase().includes(q) ||
-      lead.assignedTo?.toLowerCase().includes(q)
-    );
-  });
+  const filteredLeads = leads;
 
   const modalLeadOptions = useMemo(() => {
     return [...allLeads].sort((a, b) => {
@@ -217,7 +208,10 @@ export default function LeadAssignmentPage() {
               placeholder="Search by name, phone, city, or assignee..."
               className="w-full pl-10 pr-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setPagination((p) => ({ ...p, page: 1 }));
+              }}
             />
           </div>
           <select
@@ -230,13 +224,16 @@ export default function LeadAssignmentPage() {
               <option key={s.value} value={s.value}>{s.label}</option>
             ))}
           </select>
-          <input
-            type="text"
-            placeholder="Filter by city..."
-            className="px-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a] md:w-44"
-            value={filterCity}
-            onChange={(e) => { setFilterCity(e.target.value); setPagination((p) => ({ ...p, page: 1 })); }}
-          />
+          <select
+            className="px-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a] md:w-56"
+            value={filterPartner}
+            onChange={(e) => { setFilterPartner(e.target.value); setPagination((p) => ({ ...p, page: 1 })); }}
+          >
+            <option value="">All Channel Partners</option>
+            {activePartners.map((partner) => (
+              <option key={partner._id} value={partner.name}>{partner.name}</option>
+            ))}
+          </select>
         </div>
       </div>
 
