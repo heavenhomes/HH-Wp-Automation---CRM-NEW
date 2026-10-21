@@ -28,6 +28,7 @@ import {
   matchPlace,
 } from '@/lib/place-names';
 import { formatSiteVisitTime } from '@/lib/site-visit-time';
+import { notifyOwnersOfNewLead } from '@/lib/push-notifications';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -2294,7 +2295,7 @@ async function handleListPhotosMessage(phone, lead, incoming) {
   await sendText(phone, msg);
 }
 
-async function handleMessage(phone, incoming) {
+async function handleMessage(phone, incoming, appUrl) {
   const normalizedPhone = normalizePhoneNumber(phone);
   let lead = await Lead.findOne({
     phone: { $in: getPhoneNumberLookupValues(normalizedPhone) },
@@ -2319,6 +2320,14 @@ async function handleMessage(phone, incoming) {
       });
     }
     await lead.save();
+    try {
+      await notifyOwnersOfNewLead(
+        lead,
+        appUrl
+      );
+    } catch (error) {
+      console.error('[push] new WhatsApp lead notification failed:', error);
+    }
     await sendWelcomeAndLanguagePrompt(phone, lead);
     return;
   }
@@ -2810,7 +2819,13 @@ export async function POST(request) {
 
     await Promise.all(
       messages.map((incoming) =>
-        enqueueForPhone(incoming.from, () => handleMessage(incoming.from, incoming))
+        enqueueForPhone(incoming.from, () =>
+          handleMessage(
+            incoming.from,
+            incoming,
+            process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin
+          )
+        )
       )
     );
 

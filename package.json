@@ -15,6 +15,8 @@
     "chart.js": "^4.5.1",
     "cloudinary": "^2.9.0",
     "date-fns": "^4.1.0",
+    "firebase": "^13.1.0",
+    "firebase-admin": "^14.5.0",
     "lucide-react": "^1.26.0",
     "mongoose": "^9.3.3",
     "next": "16.1.6",

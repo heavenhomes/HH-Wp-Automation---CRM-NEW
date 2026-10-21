@@ -6,6 +6,7 @@ import mongoose from 'mongoose';
 import { NextResponse } from 'next/server';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import SiteVisit from '@/lib/models/SiteVisit';
+import { notifyAssignedChannelPartner } from '@/lib/push-notifications';
 
 const ALLOWED_LEAD_FIELDS = [
   'phone', 'phoneNumber', 'email', 'name', 'city', 'area',
@@ -171,6 +172,21 @@ export async function PUT(request, { params }) {
       .populate('ownedPropertyDraft', 'propertyId title city area price configuration imageUrl status images');
       console.log('[lead PUT] saved assignedTo:', lead?.assignedTo);
     if (!lead) return NextResponse.json({ error: 'Lead not found' }, { status: 404 });
+    if (
+      body.assignedTo !== undefined &&
+      body.assignedTo !== existing.assignedTo &&
+      lead.assignedTo
+    ) {
+      try {
+        await notifyAssignedChannelPartner(
+          lead,
+          lead.assignedTo,
+          process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin
+        );
+      } catch (error) {
+        console.error('[push] assignment notification failed:', error);
+      }
+    }
 if (
   body.assignedTo !== undefined &&
   body.assignedTo !== existing.assignedTo
