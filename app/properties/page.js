@@ -38,6 +38,42 @@ const STATUS_OPTIONS = [
   { value: 'all', label: 'All' },
 ];
 
+const PROPERTY_SUBTYPE_OPTIONS = {
+  residential_buy: ['apartment', 'flat', 'house', 'villa', 'builder_floor', 'studio', 'penthouse', 'farmhouse', 'plot'],
+  commercial_buy: ['office', 'shop', 'showroom', 'warehouse', 'industrial', 'coworking', 'plot'],
+  residential_rent: ['apartment', 'flat', 'house', 'villa', 'builder_floor', 'pg', 'studio', 'farmhouse'],
+  commercial_rent: ['office', 'shop', 'showroom', 'warehouse', 'coworking', 'factory'],
+};
+
+const RESIDENTIAL_BUY_CONFIGURATIONS = ['1rk', '1bhk', '2bhk', '3bhk', '4bhk', '5bhk_plus', 'duplex', 'triplex', 'plot'];
+const RESIDENTIAL_RENT_CONFIGURATIONS = ['1bhk', '2bhk', '3bhk', '4bhk', '5bhk_plus', 'duplex'];
+
+const BUY_PRICE_RANGES = [
+  { value: 'buy-10-20', label: '₹10 Lakh – ₹20 Lakh', min: 1000000, max: 1999999 },
+  { value: 'buy-20-30', label: '₹20 Lakh – ₹30 Lakh', min: 2000000, max: 2999999 },
+  { value: 'buy-30-40', label: '₹30 Lakh – ₹40 Lakh', min: 3000000, max: 3999999 },
+  { value: 'buy-40-50', label: '₹40 Lakh – ₹50 Lakh', min: 4000000, max: 4999999 },
+  { value: 'buy-50-60', label: '₹50 Lakh – ₹60 Lakh', min: 5000000, max: 5999999 },
+  { value: 'buy-60-70', label: '₹60 Lakh – ₹70 Lakh', min: 6000000, max: 6999999 },
+  { value: 'buy-70-80', label: '₹70 Lakh – ₹80 Lakh', min: 7000000, max: 7999999 },
+  { value: 'buy-80-90', label: '₹80 Lakh – ₹90 Lakh', min: 8000000, max: 8999999 },
+  { value: 'buy-90-100', label: '₹90 Lakh – ₹1 Crore', min: 9000000, max: 9999999 },
+  { value: 'buy-100-plus', label: '₹1 Crore+', min: 10000000 },
+];
+
+const RENT_PRICE_RANGES = [
+  { value: 'rent-10-20', label: '₹10,000 – ₹20,000', min: 10000, max: 19999 },
+  { value: 'rent-20-30', label: '₹20,000 – ₹30,000', min: 20000, max: 29999 },
+  { value: 'rent-30-40', label: '₹30,000 – ₹40,000', min: 30000, max: 39999 },
+  { value: 'rent-40-50', label: '₹40,000 – ₹50,000', min: 40000, max: 49999 },
+  { value: 'rent-50-60', label: '₹50,000 – ₹60,000', min: 50000, max: 59999 },
+  { value: 'rent-60-70', label: '₹60,000 – ₹70,000', min: 60000, max: 69999 },
+  { value: 'rent-70-80', label: '₹70,000 – ₹80,000', min: 70000, max: 79999 },
+  { value: 'rent-80-90', label: '₹80,000 – ₹90,000', min: 80000, max: 89999 },
+  { value: 'rent-90-100', label: '₹90,000 – ₹1 Lakh', min: 90000, max: 99999 },
+  { value: 'rent-100-plus', label: '₹1 Lakh+', min: 100000 },
+];
+
 const SUBTYPE_LABEL = {
   apartment: 'Apartment / Flat',
   flat: 'Flat',
@@ -47,6 +83,7 @@ const SUBTYPE_LABEL = {
   studio: 'Studio',
   penthouse: 'Penthouse',
   farmhouse: 'Farmhouse',
+  plot: 'Land / Plot',
   pg: 'PG',
   office: 'Office Space',
   shop: 'Shop / Retail',
@@ -67,6 +104,9 @@ export default function PropertiesPage() {
   // Filters
   const [filterPropertyCode, setFilterPropertyCode] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
+  const [filterPropertySubType, setFilterPropertySubType] = useState('');
+  const [filterConfiguration, setFilterConfiguration] = useState('');
+  const [filterPriceRange, setFilterPriceRange] = useState('');
   const [filterStatus, setFilterStatus] = useState('available');
   const [filterMinPrice, setFilterMinPrice] = useState('');
   const [filterMaxPrice, setFilterMaxPrice] = useState('');
@@ -95,6 +135,8 @@ export default function PropertiesPage() {
       });
       if (filterPropertyCode) params.set('propertyCode', filterPropertyCode);
       if (filterCategory) params.set('category', filterCategory);
+      if (filterPropertySubType) params.set('propertySubType', filterPropertySubType);
+      if (filterConfiguration) params.set('configuration', filterConfiguration);
       if (filterStatus) params.set('status', filterStatus);
       if (filterMinPrice) params.set('minPrice', filterMinPrice);
       if (filterMaxPrice) params.set('maxPrice', filterMaxPrice);
@@ -127,6 +169,8 @@ export default function PropertiesPage() {
     pagination.limit,
     filterPropertyCode,
     filterCategory,
+    filterPropertySubType,
+    filterConfiguration,
     filterStatus,
     filterMinPrice,
     filterMaxPrice,
@@ -212,6 +256,9 @@ export default function PropertiesPage() {
   const clearFilters = () => {
     setFilterPropertyCode('');
     setFilterCategory('');
+    setFilterPropertySubType('');
+    setFilterConfiguration('');
+    setFilterPriceRange('');
     setFilterStatus('available');
     setFilterMinPrice('');
     setFilterMaxPrice('');
@@ -242,11 +289,13 @@ export default function PropertiesPage() {
       Boolean(
         filterPropertyCode ||
           filterCategory ||
+          filterPropertySubType ||
+          filterConfiguration ||
           filterStatus !== 'available' ||
           filterMinPrice ||
           filterMaxPrice
       ),
-    [filterPropertyCode, filterCategory, filterStatus, filterMinPrice, filterMaxPrice]
+    [filterPropertyCode, filterCategory, filterPropertySubType, filterConfiguration, filterStatus, filterMinPrice, filterMaxPrice]
   );
 
   const formatPrice = (price, propertyType) => {
@@ -277,6 +326,18 @@ export default function PropertiesPage() {
     if (!subType) return 'Property';
     return SUBTYPE_LABEL[subType] || subType;
   };
+
+  const isResidentialCategory = filterCategory.startsWith('residential_');
+  const categoryPriceRanges = filterCategory.endsWith('_buy')
+    ? BUY_PRICE_RANGES
+    : filterCategory.endsWith('_rent')
+      ? RENT_PRICE_RANGES
+      : [];
+  const categoryConfigurations = filterCategory === 'residential_buy'
+    ? RESIDENTIAL_BUY_CONFIGURATIONS
+    : filterCategory === 'residential_rent'
+      ? RESIDENTIAL_RENT_CONFIGURATIONS
+      : [];
 
   // ---------- Render ----------
   return (
@@ -338,7 +399,7 @@ export default function PropertiesPage() {
         </div>
       </div>
 
-      {/* Filter bar (unchanged) */}
+      {/* Filters */}
       <div className="bg-white rounded-2xl border border-[#e8f0e6] p-3 sm:p-4 mb-6 shadow-sm">
         <div
           className="grid gap-3"
@@ -363,6 +424,11 @@ export default function PropertiesPage() {
             value={filterCategory}
             onChange={(e) => {
               setFilterCategory(e.target.value);
+              setFilterPropertySubType('');
+              setFilterConfiguration('');
+              setFilterPriceRange('');
+              setFilterMinPrice('');
+              setFilterMaxPrice('');
               setPagination((p) => ({ ...p, page: 1 }));
             }}
             className="px-3 py-2.5 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
@@ -373,6 +439,44 @@ export default function PropertiesPage() {
               </option>
             ))}
           </select>
+
+          {filterCategory && (
+            <select
+              value={filterPropertySubType}
+              onChange={(e) => {
+                setFilterPropertySubType(e.target.value);
+                setPagination((p) => ({ ...p, page: 1 }));
+              }}
+              aria-label="Filter by property type"
+              className="px-3 py-2.5 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
+            >
+              <option value="">All Property Types</option>
+              {(PROPERTY_SUBTYPE_OPTIONS[filterCategory] || []).map((subtype) => (
+                <option key={subtype} value={subtype}>
+                  {getSubTypeLabel(subtype)}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {isResidentialCategory && (
+            <select
+              value={filterConfiguration}
+              onChange={(e) => {
+                setFilterConfiguration(e.target.value);
+                setPagination((p) => ({ ...p, page: 1 }));
+              }}
+              aria-label="Filter by configuration"
+              className="px-3 py-2.5 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
+            >
+              <option value="">All Configurations</option>
+              {categoryConfigurations.map((configuration) => (
+                <option key={configuration} value={configuration}>
+                  {configuration.toUpperCase().replace('BHK', ' BHK').replace('_PLUS', '+')}
+                </option>
+              ))}
+            </select>
+          )}
 
           <select
             value={filterStatus}
@@ -389,33 +493,54 @@ export default function PropertiesPage() {
             ))}
           </select>
 
-          <div className="relative">
-            <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6a7f6a]" />
-            <input
-              type="number"
-              placeholder="Min Price (₹)"
-              value={filterMinPrice}
+          {categoryPriceRanges.length ? (
+            <select
+              value={filterPriceRange}
               onChange={(e) => {
-                setFilterMinPrice(e.target.value);
+                const selectedRange = categoryPriceRanges.find((range) => range.value === e.target.value);
+                setFilterPriceRange(e.target.value);
+                setFilterMinPrice(selectedRange ? String(selectedRange.min) : '');
+                setFilterMaxPrice(selectedRange?.max ? String(selectedRange.max) : '');
                 setPagination((p) => ({ ...p, page: 1 }));
               }}
-              className="w-full pl-9 pr-3 py-2.5 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
-            />
-          </div>
-
-          <div className="relative">
-            <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6a7f6a]" />
-            <input
-              type="number"
-              placeholder="Max Price (₹)"
-              value={filterMaxPrice}
-              onChange={(e) => {
-                setFilterMaxPrice(e.target.value);
-                setPagination((p) => ({ ...p, page: 1 }));
-              }}
-              className="w-full pl-9 pr-3 py-2.5 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
-            />
-          </div>
+              aria-label="Filter by price range"
+              className="px-3 py-2.5 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
+            >
+              <option value="">All Price Ranges</option>
+              {categoryPriceRanges.map((range) => (
+                <option key={range.value} value={range.value}>{range.label}</option>
+              ))}
+            </select>
+          ) : (
+            <>
+              <div className="relative">
+                <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6a7f6a]" />
+                <input
+                  type="number"
+                  placeholder="Min Price (₹)"
+                  value={filterMinPrice}
+                  onChange={(e) => {
+                    setFilterMinPrice(e.target.value);
+                    setPagination((p) => ({ ...p, page: 1 }));
+                  }}
+                  className="w-full pl-9 pr-3 py-2.5 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
+                />
+              </div>
+              <div className="relative">
+                <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6a7f6a]" />
+                <input
+                  type="number"
+                  placeholder="Max Price (₹)"
+                  value={filterMaxPrice}
+                  onChange={(e) => {
+                    setFilterMaxPrice(e.target.value);
+                    setPagination((p) => ({ ...p, page: 1 }));
+                  }}
+                  className="w-full pl-9 pr-3 py-2.5 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
+                />
+              </div>
+            </>
+          )}
 
           {anyFilterActive && (
             <button

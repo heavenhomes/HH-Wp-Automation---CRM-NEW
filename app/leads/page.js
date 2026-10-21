@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import TimePicker from '@/components/SiteVisits/TimePicker';
 import { createLocalDateTime } from '@/lib/site-visit-time';
+import { normalizePhoneNumber } from '@/lib/phone-number';
+import { FaWhatsapp } from 'react-icons/fa';
 import {
   Search,
   Users,
@@ -1095,6 +1097,29 @@ export default function LeadsPage() {
 
                       <td className="px-5 py-3" data-label="Action">
                         <div className="flex items-center justify-end gap-1.5">
+                          {normalizePhoneNumber(lead.phone) ? (
+                            <a
+                              href={`https://wa.me/${normalizePhoneNumber(lead.phone)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(event) => event.stopPropagation()}
+                              title={`WhatsApp ${lead.name || lead.phone}`}
+                              aria-label={`WhatsApp ${lead.name || lead.phone}`}
+                              className="p-1.5 rounded-lg border border-[#e8f0e6] hover:bg-[#f0f7ef] hover:border-[#25d366] transition-colors"
+                            >
+                              <FaWhatsapp className="w-3.5 h-3.5 text-[#25d366]" />
+                            </a>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled
+                              title="WhatsApp unavailable: no phone number"
+                              aria-label="WhatsApp unavailable: no phone number"
+                              className="p-1.5 rounded-lg border border-[#e8f0e6] text-[#a8b5a5] disabled:cursor-not-allowed"
+                            >
+                              <FaWhatsapp className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           <a
                             href={`tel:${String(lead.phone || "").replace(/[^\d+]/g, "")}`}
                             onClick={(event) => event.stopPropagation()}
