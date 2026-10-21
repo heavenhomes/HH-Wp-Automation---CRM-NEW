@@ -15,6 +15,7 @@ import {
   ArrowLeft, Phone, MessageSquare,
   Star, Building2, Image as ImageIcon, Pencil,
   Bell, Calendar, UserRoundPen, Plus, X, Loader2, StickyNote,
+  Send,
 } from 'lucide-react';
 
 const TABS = [
@@ -151,6 +152,7 @@ export default function LeadDetailPage() {
     notes: [],
   });
   const [subLoading, setSubLoading] = useState(false);
+  const [conversationLastInboundAt, setConversationLastInboundAt] = useState(null);
   const [selectedGallery, setSelectedGallery] = useState(null);
   const [personalInfoOpen, setPersonalInfoOpen] = useState(false);
   const [enquiryOpen, setEnquiryOpen] = useState(false);
@@ -247,6 +249,9 @@ export default function LeadDetailPage() {
             setSubData((p) => ({ ...p, followUps: json.data }));
           } else {
             setSubData((p) => ({ ...p, [key]: json.data }));
+            if (key === 'conversation') {
+              setConversationLastInboundAt(json.lastInboundMessageAt || null);
+            }
           }
         }
       } catch (e) {
@@ -255,6 +260,26 @@ export default function LeadDetailPage() {
         setSubLoading(false);
       }
     })();
+  }, [activeTab, lead]);
+
+  useEffect(() => {
+    if (activeTab !== 'conversation' || !lead) return;
+
+    const refreshConversation = async () => {
+      try {
+        const response = await fetch(`/api/leads/${lead._id}/conversation`, { cache: 'no-store' });
+        const json = await response.json();
+        if (response.ok && json.success) {
+          setSubData((current) => ({ ...current, conversation: json.data || [] }));
+          setConversationLastInboundAt(json.lastInboundMessageAt || null);
+        }
+      } catch (error) {
+        console.error('[lead-detail] conversation refresh error:', error);
+      }
+    };
+
+    const interval = setInterval(refreshConversation, 10000);
+    return () => clearInterval(interval);
   }, [activeTab, lead]);
 
   const updateLead = async (patch) => {
@@ -608,7 +633,21 @@ export default function LeadDetailPage() {
               />
             )}
             {activeTab === 'conversation' && (
-              <ConversationTab conversation={subData.conversation} />
+              <ConversationTab
+                leadId={lead._id}
+                leadName={lead.name}
+                conversation={subData.conversation}
+                lastInboundMessageAt={conversationLastInboundAt}
+                onMessageSent={(message, lastInboundMessageAt) => {
+                  setSubData((current) => ({
+                    ...current,
+                    conversation: [...current.conversation, message].sort(
+                      (a, b) => new Date(a.at || 0) - new Date(b.at || 0)
+                    ),
+                  }));
+                  setConversationLastInboundAt(lastInboundMessageAt || null);
+                }}
+              />
             )}
             {activeTab === 'followups' && (
               <FollowUpsTab data={subData.followUps} />
@@ -1253,86 +1292,192 @@ function InterestedTab({ interests, selectedProperty, onOpenGallery }) {
   );
 }
 
-function ConversationTab({ conversation }) {
-  if (!conversation?.length)
-    return <Empty icon={MessageSquare} text="No conversation yet" />;
+const CUSTOMER_CONNECT_TEMPLATES = [
+  'customer_connect_request_english',
+  'customer_connect_request_hindi',
+  'customer_connect_request_gujarati',
+];
 
-  const groups = groupByDay(conversation);
+function ConversationTab({
+  leadId,
+  leadName,
+  conversation,
+  lastInboundMessageAt,
+  onMessageSent,
+}) {
+  const [mode, setMode] = useState('message');
+  const [selectedTemplate, setSelectedTemplate] = useState(CUSTOMER_CONNECT_TEMPLATES[0]);
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  const lastInboundTime = lastInboundMessageAt
+    ? new Date(lastInboundMessageAt).getTime()
+    : 0;
+  const windowOpen =
+    Number.isFinite(lastInboundTime) &&
+    lastInboundTime > 0 &&
+    now - lastInboundTime < 24 * 60 * 60 * 1000;
+  const effectiveMode = windowOpen ? mode : 'template';
+  const groups = groupByDay(conversation || []);
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleSend = async (event) => {
+    event.preventDefault();
+    if (sending) return;
+
+    setSending(true);
+    try {
+      const response = await fetch(`/api/leads/${leadId}/conversation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          effectiveMode === 'message'
+            ? { mode: 'message', text }
+            : { mode: 'template', templateName: selectedTemplate }
+        ),
+      });
+      const json = await response.json();
+      if (!response.ok || !json.success) {
+        throw new Error(json.error || 'Failed to send WhatsApp message');
+      }
+
+      onMessageSent(json.data, json.lastInboundMessageAt);
+      setText('');
+      toast.success(effectiveMode === 'template' ? 'WhatsApp template sent' : 'WhatsApp message sent');
+    } catch (error) {
+      toast.error(error.message || 'Failed to send WhatsApp message');
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
-    <div className="max-h-[640px] overflow-y-auto pr-1 space-y-5">
-      {groups.map((group) => (
-        <div key={group.key}>
-          {/* Date separator — centered like WhatsApp */}
-          <div className="flex items-center justify-center my-3">
-            <span className="px-3 py-1 text-[11px] font-medium text-[#6a7f6a] bg-[#f0f7ef] rounded-full border border-[#e8f0e6] shadow-sm">
-              {formatDayLabel(group.date)}
-            </span>
+    <div className="overflow-hidden rounded-2xl border border-[#dbe9d9] bg-[#f7fbf6]">
+      <div className="flex items-center justify-between gap-3 border-b border-[#e3eee1] bg-white px-4 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#e8f4e7] text-[#2d7a3a]">
+            <MessageSquare className="h-5 w-5" />
           </div>
-
-          {/* Messages for this day — no date inside, only time */}
-          <div className="space-y-1.5">
-            {group.items.map((c) => (
-              <div
-                key={c._id}
-                className={`flex ${
-                  c.direction === 'in' ? 'justify-start' : 'justify-end'
-                }`}
-              >
-                <div
-                  className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-3 sm:px-4 py-2 ${
-                    c.direction === 'in'
-                      ? 'bg-[#f0f7ef] text-[#1a2e1a] border border-[#e8f0e6] rounded-tl-md'
-                      : 'bg-[#2d7a3a] text-white rounded-tr-md'
-                  }`}
-                >
-                  {c.type === 'image' ? (
-                    c.imageUrl ? (
-                      <img
-                        src={c.imageUrl}
-                        alt=""
-                        className="rounded-lg max-w-full"
-                      />
-                    ) : (
-                      <p className="text-sm italic">📷 Image</p>
-                    )
-                  ) : (
-                    <p className="text-sm whitespace-pre-wrap break-words">
-                      {c.text || '—'}
-                    </p>
-                  )}
-
-                  {c.payload?.buttons && (
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {c.payload.buttons.map((b, i) => (
-                        <span
-                          key={i}
-                          className={`text-xs px-2 py-0.5 rounded ${
-                            c.direction === 'in'
-                              ? 'bg-white/50'
-                              : 'bg-white/20'
-                          }`}
-                        >
-                          {b.title}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Time only — no date */}
-                  <p
-                    className={`text-[10px] mt-1 text-right ${
-                      c.direction === 'in' ? 'text-[#6a7f6a]' : 'text-white/70'
-                    }`}
-                  >
-                    {formatTime12h(c.at)}
-                  </p>
-                </div>
-              </div>
-            ))}
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-[#1a2e1a]">{leadName || 'WhatsApp conversation'}</p>
+            <p className={`text-xs ${windowOpen ? 'text-[#2d7a3a]' : 'text-[#9a6b18]'}`}>
+              {windowOpen
+                ? `24-hour messaging window open · closes ${new Date(lastInboundTime + 24 * 60 * 60 * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+                : '24-hour window closed · approved templates only'}
+            </p>
           </div>
         </div>
-      ))}
+        <span className={`hidden shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium sm:inline-flex ${windowOpen ? 'bg-[#e8f4e7] text-[#2d7a3a]' : 'bg-[#fff3d8] text-[#8b641a]'}`}>
+          {windowOpen ? 'Open' : 'Closed'}
+        </span>
+      </div>
+
+      <div className="max-h-[480px] min-h-[220px] space-y-5 overflow-y-auto px-3 py-2 sm:px-5">
+        {groups.length === 0 ? (
+          <div className="flex min-h-[200px] items-center justify-center text-sm text-[#6a7f6a]">
+            No conversation yet. Start by sending an approved template.
+          </div>
+        ) : groups.map((group) => (
+          <div key={group.key}>
+            <div className="my-3 flex items-center justify-center">
+              <span className="rounded-full border border-[#e8f0e6] bg-white/90 px-3 py-1 text-[11px] font-medium text-[#6a7f6a] shadow-sm">
+                {formatDayLabel(group.date)}
+              </span>
+            </div>
+            <div className="space-y-1.5">
+              {group.items.map((c) => (
+                <div key={c._id} className={`flex ${c.direction === 'in' ? 'justify-start' : 'justify-end'}`}>
+                  <div className={`max-w-[88%] rounded-2xl px-3 py-2 sm:max-w-[75%] sm:px-4 ${
+                    c.direction === 'in'
+                      ? 'rounded-tl-md border border-[#e8f0e6] bg-white text-[#1a2e1a]'
+                      : 'rounded-tr-md bg-[#d9fdd3] text-[#1a2e1a]'
+                  }`}>
+                    {c.type === 'image' ? (
+                      c.imageUrl ? (
+                        <img src={c.imageUrl} alt="" className="max-w-full rounded-lg" />
+                      ) : (
+                        <p className="text-sm italic">Image</p>
+                      )
+                    ) : (
+                      <p className="whitespace-pre-wrap break-words text-sm">{c.text || '—'}</p>
+                    )}
+                    {c.payload?.templateName && (
+                      <p className="mt-1 text-[10px] text-[#547254]">Template · {c.payload.templateName}</p>
+                    )}
+                    {c.payload?.buttons && (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {c.payload.buttons.map((button, index) => (
+                          <span key={index} className="rounded bg-black/5 px-2 py-0.5 text-xs">
+                            {button.title}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <p className="mt-1 text-right text-[10px] text-[#6a7f6a]">
+                      {formatTime12h(c.at)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <form onSubmit={handleSend} className="border-t border-[#e3eee1] bg-white p-3 sm:p-4">
+        <div className="mb-2 flex flex-col gap-2 sm:flex-row">
+          <select
+            aria-label="WhatsApp message type"
+            value={effectiveMode}
+            onChange={(event) => setMode(event.target.value)}
+            className="w-full rounded-xl border border-[#dce8da] bg-[#fbfdfb] px-3 py-2 text-sm text-[#1a2e1a] sm:w-48"
+          >
+            <option value="message" disabled={!windowOpen}>Free-form message</option>
+            <option value="template">Approved template</option>
+          </select>
+          {effectiveMode === 'template' && (
+            <select
+              aria-label="Choose an approved WhatsApp template"
+              value={selectedTemplate}
+              onChange={(event) => setSelectedTemplate(event.target.value)}
+              className="min-w-0 flex-1 rounded-xl border border-[#dce8da] bg-[#fbfdfb] px-3 py-2 text-sm text-[#1a2e1a]"
+            >
+              {CUSTOMER_CONNECT_TEMPLATES.map((templateName) => (
+                <option key={templateName} value={templateName}>{templateName}</option>
+              ))}
+            </select>
+          )}
+        </div>
+        <div className="flex items-end gap-2">
+          {effectiveMode === 'message' ? (
+            <textarea
+              aria-label="WhatsApp message"
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              placeholder="Type a message"
+              rows={2}
+              maxLength={4096}
+              className="min-h-[44px] flex-1 resize-y rounded-xl border border-[#dce8da] bg-[#fbfdfb] px-3 py-2.5 text-sm text-[#1a2e1a] outline-none focus:border-[#2d7a3a] focus:ring-2 focus:ring-[#2d7a3a]/15"
+            />
+          ) : (
+            <p className="flex min-h-[44px] flex-1 items-center rounded-xl bg-[#f7fbf6] px-3 py-2 text-xs text-[#6a7f6a]">
+              Sends the approved template with the lead&apos;s name and its quick-reply buttons.
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={sending || (effectiveMode === 'message' && !text.trim())}
+            className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-[#2d7a3a] px-4 text-sm font-medium text-white transition hover:bg-[#256631] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            <span>{sending ? 'Sending' : effectiveMode === 'template' ? 'Send template' : 'Send'}</span>
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

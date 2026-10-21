@@ -39,6 +39,7 @@ export default function SiteVisitsPage() {
   const [loading, setLoading] = useState(true);
   const [activeStatus, setActiveStatus] = useState('all');
   const [search, setSearch] = useState('');
+  const [filterDate, setFilterDate] = useState('');
   const [filterProperty, setFilterProperty] = useState('');
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ total: 0, pages: 1 });
@@ -134,14 +135,15 @@ export default function SiteVisitsPage() {
         limit: '20',
       });
       const trimmedSearch = search.trim();
-      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmedSearch)) {
-        params.set('scheduledDate', trimmedSearch);
-        params.set('timezoneOffset', String(new Date().getTimezoneOffset()));
-      } else if (trimmedSearch) {
+      if (trimmedSearch) {
         params.set('search', trimmedSearch);
       }
+      if (filterDate) {
+        params.set('scheduledDate', filterDate);
+        params.set('timezoneOffset', String(new Date().getTimezoneOffset()));
+      }
       if (filterProperty) params.set('propertyId', filterProperty);
-      if (activeStatus === 'today' && !/^\d{4}-\d{2}-\d{2}$/.test(trimmedSearch)) {
+      if (activeStatus === 'today' && !filterDate) {
         const now = new Date();
         const dateKey = [
           now.getFullYear(),
@@ -175,7 +177,7 @@ export default function SiteVisitsPage() {
   useEffect(() => {
     fetchVisits();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeStatus, page, search, filterProperty]);
+  }, [activeStatus, page, search, filterDate, filterProperty]);
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this site visit?')) return;
@@ -339,14 +341,14 @@ export default function SiteVisitsPage() {
         <KpiCard icon={CheckCircle} label="Completed Site Visits" value={stats.completed} tone="green" onClick={() => { setActiveStatus('completed'); setPage(1); }} active={activeStatus === 'completed'} />
       </div>
 
-      {/* Tabs + Search */}
+      {/* Tabs + Filters */}
       <div className="bg-white rounded-2xl border border-[#e8f0e6] p-3 sm:p-4 mb-6 shadow-sm">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
           <div className="relative min-w-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6a7f6a]" />
             <input
               type="text"
-              placeholder="Search by lead, phone, or date (YYYY-MM-DD)..."
+              placeholder="Search by lead or phone..."
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
@@ -355,6 +357,16 @@ export default function SiteVisitsPage() {
               className="w-full pl-9 pr-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
             />
           </div>
+          <input
+            aria-label="Filter site visits by date"
+            type="date"
+            value={filterDate}
+            onChange={(event) => {
+              setFilterDate(event.target.value);
+              setPage(1);
+            }}
+            className="w-full min-w-0 px-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] text-[#1a2e1a] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
+          />
           <select
             value={filterProperty}
             onChange={(event) => { setFilterProperty(event.target.value); setPage(1); }}
