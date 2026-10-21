@@ -13,7 +13,6 @@ import {
   UserPlus,
   Phone,
   MapPin,
-  Eye,
   Trash2,
   ChevronLeft,
   ChevronRight,
@@ -981,7 +980,16 @@ export default function LeadsPage() {
                   return (
                     <tr
                       key={lead._id}
-                      className="border-t border-[#eef5ec] hover:bg-[#fafffa] transition-colors"
+                      className="border-t border-[#eef5ec] hover:bg-[#fafffa] transition-colors cursor-pointer"
+                      role="link"
+                      tabIndex={0}
+                      aria-label={`View lead ${lead.name || lead.phone}`}
+                      onClick={() => router.push(`/leads/${lead._id}`)}
+                      onKeyDown={(event) => {
+                        if (event.currentTarget === event.target && event.key === "Enter") {
+                          router.push(`/leads/${lead._id}`);
+                        }
+                      }}
                     >
                       <td
                         className="px-5 py-3"
@@ -1087,16 +1095,21 @@ export default function LeadsPage() {
 
                       <td className="px-5 py-3" data-label="Action">
                         <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => router.push(`/leads/${lead._id}`)}
-                            title="View"
+                          <a
+                            href={`tel:${String(lead.phone || "").replace(/[^\d+]/g, "")}`}
+                            onClick={(event) => event.stopPropagation()}
+                            title={`Call ${lead.name || lead.phone}`}
+                            aria-label={`Call ${lead.name || lead.phone}`}
                             className="p-1.5 rounded-lg border border-[#e8f0e6] hover:bg-[#f0f7ef] hover:border-[#2d7a3a] transition-colors group"
                           >
-                            <Eye className="w-3.5 h-3.5 text-[#6a7f6a] group-hover:text-[#2d7a3a]" />
-                          </button>
+                            <Phone className="w-3.5 h-3.5 text-[#6a7f6a] group-hover:text-[#2d7a3a]" />
+                          </a>
                           {isOwner && (
                             <button
-                              onClick={() => handleDelete(lead._id)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleDelete(lead._id);
+                              }}
                               title="Delete"
                               className="p-1.5 rounded-lg border border-[#e8f0e6] hover:bg-[#fde8e8] hover:border-[#c0392b] transition-colors group"
                             >

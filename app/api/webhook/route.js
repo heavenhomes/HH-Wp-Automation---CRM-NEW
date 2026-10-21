@@ -1,5 +1,6 @@
 import dbConnect, { isDbConnected } from '@/lib/mongodb';
 import Lead from '@/lib/models/Lead';
+import { getPhoneNumberLookupValues, normalizePhoneNumber } from '@/lib/phone-number';
 import Property from '@/lib/models/Property';
 import SiteVisit from '@/lib/models/SiteVisit';
 import { generateUniquePropertyId } from '@/lib/property-id';
@@ -2289,11 +2290,14 @@ async function handleListPhotosMessage(phone, lead, incoming) {
 }
 
 async function handleMessage(phone, incoming) {
-  let lead = await Lead.findOne({ phone });
+  const normalizedPhone = normalizePhoneNumber(phone);
+  let lead = await Lead.findOne({
+    phone: { $in: getPhoneNumberLookupValues(normalizedPhone) },
+  });
 
   if (!lead) {
     lead = await Lead.create({
-      phone,
+      phone: normalizedPhone,
       step: 'askLanguage',
       lastIncomingMessageId: incoming.wamid || '',
       lastInboundMessageAt: new Date(),

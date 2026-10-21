@@ -4,6 +4,7 @@ import SiteVisit from '@/lib/models/SiteVisit';
 import Property from '@/lib/models/Property';
 import { logActivity } from '@/lib/activity/log';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
+import { getPhoneNumberLookupValues, normalizePhoneNumber } from '@/lib/phone-number';
 import { NextResponse } from 'next/server';
 
 const ALLOWED_LEAD_FIELDS = [
@@ -185,7 +186,7 @@ export async function POST(request) {
       );
     }
 
-    const phone = String(body.phone || '').trim();
+    const phone = normalizePhoneNumber(body.phone);
     if (!phone) {
       return NextResponse.json({ error: 'Phone number is required' }, { status: 400 });
     }
@@ -194,6 +195,7 @@ export async function POST(request) {
     for (const key of ALLOWED_LEAD_FIELDS) {
       if (key !== 'phone' && body[key] !== undefined) cleanBody[key] = body[key];
     }
+    if (cleanBody.phoneNumber !== undefined) cleanBody.phoneNumber = phone;
     if (!isOwner) {
       if (!session.name) {
         return NextResponse.json({ error: 'Channel partner name is missing from session' }, { status: 403 });
@@ -254,7 +256,9 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Invalid site visit date' }, { status: 400 });
     }
 
-    const existingLead = await Lead.findOne({ phone }).select('_id assignedTo').lean();
+    const existingLead = await Lead.findOne({
+      phone: { $in: getPhoneNumberLookupValues(phone) },
+    }).select('_id phone assignedTo').lean();
     if (!isOwner && existingLead && existingLead.assignedTo !== session.name) {
       return NextResponse.json(
         { error: 'A lead with this phone number already exists and is not assigned to you' },
@@ -263,7 +267,7 @@ export async function POST(request) {
     }
     const update = {
       $set: cleanBody,
-      $setOnInsert: { phone },
+      $setOnInsert: { phone: existingLead?.phone || phone },
       ...(body.source === 'manual' && cleanBody.leadType !== 'lister'
         ? { $unset: { timeline: 1 } }
         : {}),
@@ -307,7 +311,7 @@ export async function POST(request) {
     }
 
     const lead = await Lead.findOneAndUpdate(
-      { phone },
+      existingLead ? { _id: existingLead._id } : { phone },
       update,
       { returnDocument: 'after', upsert: true, runValidators: true, setDefaultsOnInsert: true }
     );
