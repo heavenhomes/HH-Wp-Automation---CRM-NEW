@@ -6,6 +6,7 @@ import { verifySessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { NextResponse } from 'next/server';
 import { logActivity } from '@/lib/activity/log';
 import { formatSiteVisitTime } from '@/lib/site-visit-time';
+import { sendSiteVisitScheduledConfirmation } from '@/lib/site-visit-confirmation';
 
 function escapeRegex(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -187,6 +188,7 @@ export async function POST(request) {
       status: 'scheduled',
       source: 'manual',
     });
+    await sendSiteVisitScheduledConfirmation(lead, visit);
 
     await Lead.findByIdAndUpdate(lead._id, {
       $set: {

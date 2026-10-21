@@ -5,6 +5,7 @@ import Property from '@/lib/models/Property';
 import { logActivity } from '@/lib/activity/log';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { getPhoneNumberLookupValues, normalizePhoneNumber } from '@/lib/phone-number';
+import { sendSiteVisitScheduledConfirmation } from '@/lib/site-visit-confirmation';
 import { NextResponse } from 'next/server';
 
 const ALLOWED_LEAD_FIELDS = [
@@ -323,7 +324,7 @@ export async function POST(request) {
       const scheduledDate = manualSiteVisitDate;
       const visitDateKey = scheduledDate.toISOString();
 
-      await SiteVisit.findOneAndUpdate(
+      const visit = await SiteVisit.findOneAndUpdate(
         {
           lead: lead._id,
           source: 'admin',
@@ -349,6 +350,7 @@ export async function POST(request) {
         },
         { upsert: true, new: true, runValidators: true }
       );
+      await sendSiteVisitScheduledConfirmation(lead, visit);
     }
 
     const isNew = !existingLead;

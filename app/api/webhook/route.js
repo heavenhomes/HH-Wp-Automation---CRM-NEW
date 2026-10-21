@@ -1,6 +1,7 @@
 import dbConnect, { isDbConnected } from '@/lib/mongodb';
 import Lead from '@/lib/models/Lead';
 import { getPhoneNumberLookupValues, normalizePhoneNumber } from '@/lib/phone-number';
+import { sendSiteVisitScheduledConfirmation } from '@/lib/site-visit-confirmation';
 import Property from '@/lib/models/Property';
 import SiteVisit from '@/lib/models/SiteVisit';
 import { generateUniquePropertyId } from '@/lib/property-id';
@@ -1733,7 +1734,7 @@ const STEPS = {
 
         const property = await PropertyModel.findById(propertyId).lean();
 
-        await SiteVisit.create({
+        const visit = await SiteVisit.create({
           lead: lead._id,
           property: propertyId,
           leadName: lead.name || '',
@@ -1746,6 +1747,10 @@ const STEPS = {
           status: 'scheduled',
           source: 'whatsapp_bot',
         });
+        const confirmation = await sendSiteVisitScheduledConfirmation(lead, visit, {
+          persist: false,
+        });
+        if (confirmation) pushConversation(lead, confirmation);
 
         pushStatusChange(
           lead,

@@ -6,6 +6,7 @@ import { logActivity } from "@/lib/activity/log";
 import { sendPostSiteVisitFollowUp } from "@/lib/site-visit-reminder-service";
 import { verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { formatSiteVisitTime } from "@/lib/site-visit-time";
+import { sendSiteVisitScheduledConfirmation } from "@/lib/site-visit-confirmation";
 import { NextResponse } from "next/server";
 
 function isValidObjectId(id) {
@@ -100,6 +101,10 @@ export async function PUT(request, { params }) {
       returnDocument: "after",
       runValidators: true,
     });
+    if (visit.status === "scheduled" && (existing.status !== "scheduled" || scheduleChanged)) {
+      const lead = await Lead.findById(visit.lead).select("name phone").lean();
+      await sendSiteVisitScheduledConfirmation(lead, visit);
+    }
     if (visit.status === "completed") {
       await Lead.findByIdAndUpdate(visit.lead, {
         $set: {

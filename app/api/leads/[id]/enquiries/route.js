@@ -1,6 +1,7 @@
 import dbConnect, { isDbConnected } from '@/lib/mongodb';
 import Lead from '@/lib/models/Lead';
 import Property from '@/lib/models/Property';
+import { sendSiteVisitScheduledConfirmation } from '@/lib/site-visit-confirmation';
 import SiteVisit from '@/lib/models/SiteVisit';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { NextResponse } from 'next/server';
@@ -176,7 +177,7 @@ export async function POST(request, { params }) {
     if (siteVisitDate) {
       const property = lead.interested ? await Property.findById(lead.interested).lean() : null;
       const visitDateKey = siteVisitDate.toISOString();
-      await SiteVisit.findOneAndUpdate(
+      const visit = await SiteVisit.findOneAndUpdate(
         { lead: lead._id, source: 'admin', rawPreferredDateTime: visitDateKey },
         {
           $set: {
@@ -195,6 +196,7 @@ export async function POST(request, { params }) {
         },
         { upsert: true, new: true, runValidators: true }
       );
+      await sendSiteVisitScheduledConfirmation(lead, visit);
     }
 
     await lead.populate([

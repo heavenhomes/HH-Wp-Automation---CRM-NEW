@@ -5,6 +5,7 @@ import Property from '@/lib/models/Property';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { logActivity } from '@/lib/activity/log';
 import { formatSiteVisitTime } from '@/lib/site-visit-time';
+import { sendSiteVisitScheduledConfirmation } from '@/lib/site-visit-confirmation';
 import { NextResponse } from 'next/server';
 
 function isValidObjectId(id) {
@@ -71,6 +72,7 @@ export async function POST(request, { params }) {
       source: 'manual',
       notes: typeof body.notes === 'string' ? body.notes.trim() : '',
     });
+    await sendSiteVisitScheduledConfirmation(lead, visit);
     await Lead.findByIdAndUpdate(lead._id, {
       $set: {
         activeSiteVisit: visit._id,
