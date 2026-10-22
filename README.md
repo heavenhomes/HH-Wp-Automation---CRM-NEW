@@ -30,6 +30,10 @@ The scheduled WhatsApp checks send the `site_visit_reminder`, `property_followup
 
 The numeric IDs from Meta are not used in Cloud API send requests. The Gujarati post-visit template name in the supplied Meta definition is `post_site_visit_followu`, so the sender uses that exact name for Gujarati and `post_site_visit_followup` for English and Hindi. Template quick-reply payloads are passed through to the webhook for the site-visit actions, property follow-up actions, and `main_menu` action. Site-visit reminders and both follow-ups are run by the existing cron jobs.
 
+## Browser notification sound
+
+To use a custom sound for notifications while the CRM is open, place an MP3 file at `public/notification.mp3`. Browsers do not allow web push service workers to play a custom audio file for background notifications; those use the operating system's notification sound. Foreground sound playback can also be blocked until the user has interacted with the page, depending on browser settings.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

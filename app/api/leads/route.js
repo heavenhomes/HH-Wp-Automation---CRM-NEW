@@ -6,7 +6,10 @@ import { logActivity } from '@/lib/activity/log';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { getPhoneNumberLookupValues, normalizePhoneNumber } from '@/lib/phone-number';
 import { sendSiteVisitScheduledConfirmation } from '@/lib/site-visit-confirmation';
-import { notifyOwnersOfNewLead } from '@/lib/push-notifications';
+import {
+  notifyAssignedChannelPartner,
+  notifyOwnersOfNewLead,
+} from '@/lib/push-notifications';
 import { NextResponse } from 'next/server';
 
 const ALLOWED_LEAD_FIELDS = [
@@ -373,6 +376,18 @@ export async function POST(request) {
         );
       } catch (error) {
         console.error('[push] new lead notification failed:', error);
+      }
+    }
+
+    if (lead.assignedTo && lead.assignedTo !== existingLead?.assignedTo) {
+      try {
+        await notifyAssignedChannelPartner(
+          lead,
+          lead.assignedTo,
+          process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin
+        );
+      } catch (error) {
+        console.error('[push] lead assignment notification failed:', error);
       }
     }
 

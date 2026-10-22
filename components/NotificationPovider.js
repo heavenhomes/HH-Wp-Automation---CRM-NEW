@@ -14,6 +14,8 @@ export default function NotificationProvider({ children }) {
   useEffect(() => {
     if (!user) return;
 
+    const notificationSound = new Audio('/notification.mp3');
+
     // Register & save token (will prompt permission once)
     registerAndSaveFcmToken().catch((e) =>
       console.error('[fcm] register failed', e)
@@ -21,6 +23,10 @@ export default function NotificationProvider({ children }) {
 
     // Foreground: show a toast too (background handled by SW)
     const unsub = listenForegroundMessages((payload) => {
+      notificationSound.currentTime = 0;
+      notificationSound.play().catch((error) => {
+        console.warn('[notification sound] Playback failed:', error);
+      });
       toast(
         `${payload.notification?.title || ''}\n${payload.notification?.body || ''}`,
         { icon: '🔔', duration: 6000 }
