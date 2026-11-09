@@ -22,6 +22,7 @@ import {
   Loader2,
   Check,
   Phone,
+  MessageCircle,
 } from 'lucide-react';
 
 const CATEGORY_OPTIONS = [
@@ -665,6 +666,21 @@ export default function PropertiesPage() {
                       {getCategoryLabel(property)}
                     </span>
                   </div>
+                  {property.source === 'whatsapp_bot' && (
+                    <div className="mb-2 space-y-1">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-[#e8f5e6] px-2.5 py-1 text-[11px] font-medium text-[#2d7a3a]">
+                        <MessageCircle className="h-3 w-3" />
+                        WhatsApp listing
+                      </span>
+                      <p className="text-xs text-[#4f6b4f]">
+                        Owner: <span className="font-medium text-[#1a2e1a]">{property.ownerName || 'Not provided'}</span>
+                      </p>
+                      <p className="flex items-center gap-1 text-xs text-[#4f6b4f]">
+                        <Phone className="h-3 w-3" />
+                        Mobile: {property.ownerPhone || 'Not provided'}
+                      </p>
+                    </div>
+                  )}
 
                   <h3
                     className="text-base font-semibold text-[#1a2e1a] mb-1.5 leading-snug line-clamp-2"

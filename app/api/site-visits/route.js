@@ -1,12 +1,15 @@
 import dbConnect, { isDbConnected } from '@/lib/mongodb';
 import SiteVisit from '@/lib/models/SiteVisit';
 import Lead from '@/lib/models/Lead';
-import Property from '@/lib/models/Property';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { NextResponse } from 'next/server';
 import { logActivity } from '@/lib/activity/log';
 import { formatSiteVisitTime } from '@/lib/site-visit-time';
 import { sendSiteVisitScheduledConfirmation } from '@/lib/site-visit-confirmation';
+import {
+  findAvailableSiteVisitProperties,
+  getSiteVisitPropertyIds,
+} from '@/lib/site-visit-properties';
 
 function escapeRegex(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -62,7 +65,7 @@ export async function GET(request) {
       if (!isValidObjectId(propertyId)) {
         return NextResponse.json({ error: 'Invalid property ID' }, { status: 400 });
       }
-      query.property = propertyId;
+      query.$and = [{ $or: [{ property: propertyId }, { properties: propertyId }] }];
     }
 
     if (dateFilter === 'today' || scheduledDate) {
@@ -111,6 +114,8 @@ export async function GET(request) {
 
     const [visits, total] = await Promise.all([
       SiteVisit.find(query)
+        .populate('properties', 'propertyId title')
+        .populate('property', 'propertyId title')
         .sort({ scheduledDate: 1, createdAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -150,15 +155,16 @@ export async function POST(request) {
     if (!body || typeof body !== 'object') {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
     }
+    const propertyIds = getSiteVisitPropertyIds(body);
     if (
       !isValidObjectId(body.leadId) ||
-      !isValidObjectId(body.propertyId) ||
+      !propertyIds ||
       !body.scheduledDate ||
       typeof body.scheduledTime !== 'string' ||
       !body.scheduledTime.trim()
     ) {
       return NextResponse.json(
-        { error: 'Valid leadId, propertyId, scheduledDate, and scheduledTime are required' },
+        { error: 'Valid leadId, propertyIds, scheduledDate, and scheduledTime are required' },
         { status: 400 }
       );
     }
@@ -168,20 +174,24 @@ export async function POST(request) {
       return NextResponse.json({ error: 'A valid date and time are required' }, { status: 400 });
     }
 
-    const [lead, property] = await Promise.all([
+    const [lead, properties] = await Promise.all([
       Lead.findById(body.leadId).lean(),
-      Property.findById(body.propertyId).lean(),
+      findAvailableSiteVisitProperties(propertyIds),
     ]);
     if (!lead) return NextResponse.json({ error: 'Lead not found' }, { status: 404 });
-    if (!property) return NextResponse.json({ error: 'Property not found' }, { status: 404 });
+    if (properties.length !== propertyIds.length) {
+      return NextResponse.json({ error: 'One or more available properties were not found' }, { status: 404 });
+    }
+    const primaryProperty = properties[0];
 
     const visit = await SiteVisit.create({
       lead: lead._id,
-      property: property._id,
+      property: primaryProperty._id,
+      properties: properties.map((property) => property._id),
       leadName: lead.name || '',
       leadPhone: lead.phone || '',
-      propertyTitle: property.title || '',
-      propertyCode: property.propertyId || '',
+      propertyTitle: properties.map((property) => property.title || '').filter(Boolean).join(', '),
+      propertyCode: properties.map((property) => property.propertyId || '').filter(Boolean).join(', '),
       scheduledDate,
       scheduledTime,
       channelPartnerName: lead.assignedTo || '',

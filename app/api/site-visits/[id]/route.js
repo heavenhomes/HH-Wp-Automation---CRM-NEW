@@ -1,12 +1,15 @@
 import dbConnect, { isDbConnected } from "@/lib/mongodb";
 import SiteVisit from "@/lib/models/SiteVisit";
 import Lead from "@/lib/models/Lead";
-import Property from "@/lib/models/Property";
 import { logActivity } from "@/lib/activity/log";
 import { sendPostSiteVisitFollowUp } from "@/lib/site-visit-reminder-service";
 import { verifySessionToken, SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { formatSiteVisitTime } from "@/lib/site-visit-time";
 import { sendSiteVisitScheduledConfirmation } from "@/lib/site-visit-confirmation";
+import {
+  findAvailableSiteVisitProperties,
+  getSiteVisitPropertyIds,
+} from "@/lib/site-visit-properties";
 import { NextResponse } from "next/server";
 
 function isValidObjectId(id) {
@@ -40,6 +43,7 @@ export async function PUT(request, { params }) {
       "scheduledDate",
       "scheduledTime",
       "propertyId",
+      "propertyIds",
       "channelPartnerName",
       "status",
       "notes",
@@ -66,16 +70,21 @@ export async function PUT(request, { params }) {
       return NextResponse.json({ error: "You can only edit visits assigned to you" }, { status: 403 });
     }
 
-    if (clean.propertyId !== undefined) {
-      if (!isValidObjectId(clean.propertyId)) {
-        return NextResponse.json({ error: "Invalid property ID" }, { status: 400 });
+    if (clean.propertyId !== undefined || clean.propertyIds !== undefined) {
+      const propertyIds = getSiteVisitPropertyIds(clean);
+      if (!propertyIds) {
+        return NextResponse.json({ error: "One or more property IDs are invalid" }, { status: 400 });
       }
-      const property = await Property.findOne({ _id: clean.propertyId, status: "available" }).lean();
-      if (!property) return NextResponse.json({ error: "Available property not found" }, { status: 404 });
-      clean.property = property._id;
-      clean.propertyTitle = property.title || "";
-      clean.propertyCode = property.propertyId || "";
+      const properties = await findAvailableSiteVisitProperties(propertyIds);
+      if (properties.length !== propertyIds.length) {
+        return NextResponse.json({ error: "One or more available properties were not found" }, { status: 404 });
+      }
+      clean.properties = properties.map((property) => property._id);
+      clean.property = properties[0]._id;
+      clean.propertyTitle = properties.map((property) => property.title || "").filter(Boolean).join(", ");
+      clean.propertyCode = properties.map((property) => property.propertyId || "").filter(Boolean).join(", ");
       delete clean.propertyId;
+      delete clean.propertyIds;
     }
 
     // If the date changed and the status is now 'rescheduled', capture the old
@@ -116,6 +125,8 @@ export async function PUT(request, { params }) {
     const postVisitFollowUp = existing.status !== "completed" && visit.status === "completed"
       ? await sendPostSiteVisitFollowUp(visit._id)
       : null;
+    await visit.populate("properties", "propertyId title city area price configuration imageUrl");
+    await visit.populate("property", "propertyId title city area price configuration imageUrl");
     let description = `Site visit updated: ${visit.leadName} → ${visit.propertyTitle}`;
     let severity = "info";
 

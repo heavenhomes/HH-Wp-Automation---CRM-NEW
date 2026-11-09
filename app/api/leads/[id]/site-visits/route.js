@@ -1,11 +1,14 @@
 import dbConnect, { isDbConnected } from '@/lib/mongodb';
 import SiteVisit from '@/lib/models/SiteVisit';
 import Lead from '@/lib/models/Lead';
-import Property from '@/lib/models/Property';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { logActivity } from '@/lib/activity/log';
 import { formatSiteVisitTime } from '@/lib/site-visit-time';
 import { sendSiteVisitScheduledConfirmation } from '@/lib/site-visit-confirmation';
+import {
+  findAvailableSiteVisitProperties,
+  getSiteVisitPropertyIds,
+} from '@/lib/site-visit-properties';
 import { NextResponse } from 'next/server';
 
 function isValidObjectId(id) {
@@ -31,13 +34,14 @@ export async function POST(request, { params }) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
     }
+    const propertyIds = getSiteVisitPropertyIds(body);
     if (
-      !isValidObjectId(body.propertyId) ||
+      !propertyIds ||
       typeof body.scheduledDate !== 'string' ||
       typeof body.scheduledTime !== 'string' ||
       !body.scheduledTime.trim()
     ) {
-      return NextResponse.json({ error: 'A valid property, date, and time are required' }, { status: 400 });
+      return NextResponse.json({ error: 'Valid properties, date, and time are required' }, { status: 400 });
     }
     const scheduledDate = new Date(body.scheduledDate);
     const scheduledTime = formatSiteVisitTime(body.scheduledTime);
@@ -45,9 +49,9 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: 'A valid date and time are required' }, { status: 400 });
     }
 
-    const [lead, property] = await Promise.all([
+    const [lead, properties] = await Promise.all([
       Lead.findById(id).lean(),
-      Property.findOne({ _id: body.propertyId, status: 'available' }).lean(),
+      findAvailableSiteVisitProperties(propertyIds),
     ]);
     if (!lead) return NextResponse.json({ error: 'Lead not found' }, { status: 404 });
     if (
@@ -56,15 +60,19 @@ export async function POST(request, { params }) {
     ) {
       return NextResponse.json({ error: 'You can only schedule site visits for leads assigned to you' }, { status: 403 });
     }
-    if (!property) return NextResponse.json({ error: 'Available property not found' }, { status: 404 });
+    if (properties.length !== propertyIds.length) {
+      return NextResponse.json({ error: 'One or more available properties were not found' }, { status: 404 });
+    }
+    const primaryProperty = properties[0];
 
     const visit = await SiteVisit.create({
       lead: lead._id,
-      property: property._id,
+      property: primaryProperty._id,
+      properties: properties.map((property) => property._id),
       leadName: lead.name || '',
       leadPhone: lead.phone || '',
-      propertyTitle: property.title || '',
-      propertyCode: property.propertyId || '',
+      propertyTitle: properties.map((property) => property.title || '').filter(Boolean).join(', '),
+      propertyCode: properties.map((property) => property.propertyId || '').filter(Boolean).join(', '),
       scheduledDate,
       scheduledTime,
       channelPartnerName: lead.assignedTo || '',
@@ -72,6 +80,8 @@ export async function POST(request, { params }) {
       source: 'manual',
       notes: typeof body.notes === 'string' ? body.notes.trim() : '',
     });
+    await visit.populate('properties', 'propertyId title city area price configuration imageUrl');
+    await visit.populate('property', 'propertyId title city area price configuration imageUrl');
     await sendSiteVisitScheduledConfirmation(lead, visit);
     await Lead.findByIdAndUpdate(lead._id, {
       $set: {
@@ -110,6 +120,7 @@ export async function GET(request, { params }) {
 
     const visits = await SiteVisit.find({ lead: id })
       .populate('property', 'propertyId title city area price configuration imageUrl')
+      .populate('properties', 'propertyId title city area price configuration imageUrl')
       .sort({ scheduledDate: -1 })
       .lean();
 

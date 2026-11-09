@@ -3,6 +3,7 @@ import { useAuth } from '@/lib/auth/useAuth';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import TimePicker from '@/components/SiteVisits/TimePicker';
+import PropertyMultiSelect from '@/components/SiteVisits/PropertyMultiSelect';
 import {
   createLocalDateTime,
   formatSiteVisitTime,
@@ -50,7 +51,7 @@ export default function SiteVisitsPage() {
   const [savingNewVisit, setSavingNewVisit] = useState(false);
   const [leadOptions, setLeadOptions] = useState([]);
   const [propertyOptions, setPropertyOptions] = useState([]);
-  const [newVisit, setNewVisit] = useState({ leadId: '', propertyId: '', date: '', time: '' });
+  const [newVisit, setNewVisit] = useState({ leadId: '', propertyIds: [], date: '', time: '' });
 
   const fetchAllOptions = async (endpoint) => {
     const fetchPage = async (page) => {
@@ -198,8 +199,8 @@ export default function SiteVisitsPage() {
 
   const handleSaveEdit = async () => {
     if (!editing) return;
-    if (!editing.propertyId) {
-      toast.error('Select a property');
+    if (!editing.propertyIds?.length) {
+      toast.error('Select at least one property');
       return;
     }
     const visitDate = createLocalDateTime(editing.scheduledDate, editing.scheduledTimeInput);
@@ -215,7 +216,7 @@ export default function SiteVisitsPage() {
         body: JSON.stringify({
           scheduledDate: visitDate.toISOString(),
           scheduledTime: formatSiteVisitTime(editing.scheduledTimeInput),
-          propertyId: editing.propertyId,
+          propertyIds: editing.propertyIds,
           status: editing.status,
           notes: editing.notes,
         }),
@@ -239,6 +240,10 @@ export default function SiteVisitsPage() {
 
   const handleAddVisit = async (event) => {
     event.preventDefault();
+    if (!newVisit.propertyIds.length) {
+      toast.error('Select at least one property');
+      return;
+    }
     const visitDate = createLocalDateTime(newVisit.date, newVisit.time);
     if (!visitDate) {
       toast.error('Select a valid date and time');
@@ -252,7 +257,7 @@ export default function SiteVisitsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           leadId: newVisit.leadId,
-          propertyId: newVisit.propertyId,
+          propertyIds: newVisit.propertyIds,
           scheduledDate: visitDate.toISOString(),
           scheduledTime: formatSiteVisitTime(newVisit.time),
         }),
@@ -264,7 +269,7 @@ export default function SiteVisitsPage() {
 
       toast.success('Site visit added');
       setAddingVisit(false);
-      setNewVisit({ leadId: '', propertyId: '', date: '', time: '' });
+      setNewVisit({ leadId: '', propertyIds: [], date: '', time: '' });
       fetchVisits();
       fetchStats();
     } catch (error) {
@@ -284,6 +289,29 @@ export default function SiteVisitsPage() {
         year: 'numeric',
       });
     return 'N/A';
+  };
+
+  const getVisitPropertyNames = (visit) => {
+    const properties = Array.isArray(visit.properties) && visit.properties.length
+      ? visit.properties
+      : visit.property
+        ? [visit.property]
+        : [];
+    const names = properties
+      .map((property) => typeof property === 'object' ? property.title : '')
+      .filter(Boolean);
+    return names.length ? names : (visit.propertyTitle || 'N/A').split(', ');
+  };
+
+  const getVisitPropertyIds = (visit) => {
+    const properties = Array.isArray(visit.properties) && visit.properties.length
+      ? visit.properties
+      : visit.property
+        ? [visit.property]
+        : [];
+    return properties
+      .map((property) => String(property?._id || property || ''))
+      .filter(Boolean);
   };
 
   const renderTimeCell = (v) => {
@@ -438,10 +466,9 @@ export default function SiteVisitsPage() {
                       </p>
                     </td>
                     <td className="px-5 py-3">
-                      <p className="text-sm text-[#1a2e1a]">{v.propertyTitle || 'N/A'}</p>
-                      {v.propertyCode && (
-                        <code className="text-xs font-mono text-[#6a7f6a]">{v.propertyCode}</code>
-                      )}
+                      {getVisitPropertyNames(v).map((name, index) => (
+                        <p key={`${v._id}-property-${index}`} className="text-sm text-[#1a2e1a]">{name}</p>
+                      ))}
                     </td>
                     <td className="px-5 py-3">
                       <p className="text-sm text-[#4f6b4f]">{renderDateCell(v)}</p>
@@ -464,7 +491,7 @@ export default function SiteVisitsPage() {
                               ...v,
                               scheduledDate: v.scheduledDate ? localDateInput(v.scheduledDate) : '',
                               scheduledTimeInput: formatSiteVisitTime(v.scheduledTime, v.scheduledDate),
-                              propertyId: String(v.property || ''),
+                              propertyIds: getVisitPropertyIds(v),
                             });
                           }}
                           title="Edit"
@@ -533,7 +560,9 @@ export default function SiteVisitsPage() {
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="min-w-0">
                     <p className="text-[#6a7f6a] uppercase tracking-wider text-[10px]">Property</p>
-                    <p className="text-[#1a2e1a] mt-0.5 truncate">{v.propertyTitle || 'N/A'}</p>
+                    {getVisitPropertyNames(v).map((name, index) => (
+                      <p key={`${v._id}-property-${index}`} className="text-[#1a2e1a] mt-0.5 truncate">{name}</p>
+                    ))}
                   </div>
                   <div className="min-w-0">
                     <p className="text-[#6a7f6a] uppercase tracking-wider text-[10px]">Date</p>
@@ -559,7 +588,7 @@ export default function SiteVisitsPage() {
                         ...v,
                         scheduledDate: v.scheduledDate ? localDateInput(v.scheduledDate) : '',
                         scheduledTimeInput: formatSiteVisitTime(v.scheduledTime, v.scheduledDate),
-                        propertyId: String(v.property || ''),
+                        propertyIds: getVisitPropertyIds(v),
                       });
                     }}
                     className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-[#2d7a3a] bg-[#e8f5e6] rounded-lg"
@@ -644,19 +673,12 @@ export default function SiteVisitsPage() {
                 </Field>
               </div>
 
-              <Field label="Property">
-                <select
-                  value={editing.propertyId || ''}
-                  onChange={(event) => setEditing((previous) => ({ ...previous, propertyId: event.target.value }))}
-                  className="w-full px-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
-                >
-                  <option value="">Select an active property</option>
-                  {propertyOptions.map((property) => (
-                    <option key={property._id} value={property._id}>
-                      {property.title} · {property.propertyId}
-                    </option>
-                  ))}
-                </select>
+              <Field label="Properties">
+                <PropertyMultiSelect
+                  properties={propertyOptions}
+                  value={editing.propertyIds || []}
+                  onChange={(propertyIds) => setEditing((previous) => ({ ...previous, propertyIds }))}
+                />
               </Field>
 
               <Field label="Channel Partner">
@@ -755,21 +777,13 @@ export default function SiteVisitsPage() {
                 </select>
               </Field>
 
-              <Field label="Property">
-                <select
-                  required
-                  value={newVisit.propertyId}
-                  onChange={(event) => setNewVisit((current) => ({ ...current, propertyId: event.target.value }))}
+              <Field label="Properties">
+                <PropertyMultiSelect
+                  properties={propertyOptions}
+                  value={newVisit.propertyIds}
+                  onChange={(propertyIds) => setNewVisit((current) => ({ ...current, propertyIds }))}
                   disabled={loadingOptions || savingNewVisit}
-                  className="w-full px-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a] disabled:opacity-60"
-                >
-                  <option value="">{loadingOptions ? 'Loading properties...' : 'Select a property'}</option>
-                  {propertyOptions.map((property) => (
-                    <option key={property._id} value={property._id}>
-                      {property.title}{property.propertyId ? ` · ${property.propertyId}` : ''}
-                    </option>
-                  ))}
-                </select>
+                />
               </Field>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

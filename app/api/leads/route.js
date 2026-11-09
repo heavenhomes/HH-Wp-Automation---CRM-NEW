@@ -1,11 +1,14 @@
 import dbConnect, { isDbConnected } from '@/lib/mongodb';
 import Lead from '@/lib/models/Lead';
 import SiteVisit from '@/lib/models/SiteVisit';
-import Property from '@/lib/models/Property';
 import { logActivity } from '@/lib/activity/log';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { getPhoneNumberLookupValues, normalizePhoneNumber } from '@/lib/phone-number';
 import { sendSiteVisitScheduledConfirmation } from '@/lib/site-visit-confirmation';
+import {
+  findAvailableSiteVisitProperties,
+  getSiteVisitPropertyIds,
+} from '@/lib/site-visit-properties';
 import {
   notifyAssignedChannelPartner,
   notifyOwnersOfNewLead,
@@ -260,6 +263,27 @@ export async function POST(request) {
     if (manualSiteVisitDate && Number.isNaN(manualSiteVisitDate.getTime())) {
       return NextResponse.json({ error: 'Invalid site visit date' }, { status: 400 });
     }
+    let manualSiteVisitProperties = [];
+    if (manualSiteVisitDate) {
+      if (body.siteVisitPropertyIds !== undefined && !Array.isArray(body.siteVisitPropertyIds)) {
+        return NextResponse.json({ error: 'Site visit properties must be an array' }, { status: 400 });
+      }
+      const requestedPropertyIds = body.siteVisitPropertyIds !== undefined
+        ? body.siteVisitPropertyIds
+        : cleanBody.interested
+          ? [String(cleanBody.interested)]
+          : [];
+      if (requestedPropertyIds.length) {
+        const propertyIds = getSiteVisitPropertyIds({ propertyIds: requestedPropertyIds });
+        if (!propertyIds) {
+          return NextResponse.json({ error: 'One or more site visit property IDs are invalid' }, { status: 400 });
+        }
+        manualSiteVisitProperties = await findAvailableSiteVisitProperties(propertyIds);
+        if (manualSiteVisitProperties.length !== propertyIds.length) {
+          return NextResponse.json({ error: 'One or more available site visit properties were not found' }, { status: 404 });
+        }
+      }
+    }
 
     const existingLead = await Lead.findOne({
       phone: { $in: getPhoneNumberLookupValues(phone) },
@@ -322,11 +346,9 @@ export async function POST(request) {
     );
 
     if (manualSiteVisitDate) {
-      const property = lead.interested
-        ? await Property.findById(lead.interested).lean()
-        : null;
       const scheduledDate = manualSiteVisitDate;
       const visitDateKey = scheduledDate.toISOString();
+      const property = manualSiteVisitProperties[0] || null;
 
       const visit = await SiteVisit.findOneAndUpdate(
         {
@@ -337,10 +359,13 @@ export async function POST(request) {
         {
           $set: {
             property: property?._id || null,
+            properties: manualSiteVisitProperties.map((item) => item._id),
             leadName: lead.name || '',
             leadPhone: lead.phone || '',
-            propertyTitle: property?.title || property?.internalName || 'Property not specified',
-            propertyCode: property?.propertyId || '',
+            propertyTitle: manualSiteVisitProperties.length
+              ? manualSiteVisitProperties.map((item) => item.title || item.internalName || 'Property').join(', ')
+              : 'Property not specified',
+            propertyCode: manualSiteVisitProperties.map((item) => item.propertyId || '').filter(Boolean).join(', '),
             scheduledDate,
             scheduledTime: '',
             rawPreferredDateTime: visitDateKey,

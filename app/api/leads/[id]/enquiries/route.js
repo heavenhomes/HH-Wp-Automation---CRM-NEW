@@ -1,10 +1,13 @@
 import dbConnect, { isDbConnected } from '@/lib/mongodb';
 import Lead from '@/lib/models/Lead';
-import Property from '@/lib/models/Property';
 import { sendSiteVisitScheduledConfirmation } from '@/lib/site-visit-confirmation';
 import SiteVisit from '@/lib/models/SiteVisit';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { NextResponse } from 'next/server';
+import {
+  findAvailableSiteVisitProperties,
+  getSiteVisitPropertyIds,
+} from '@/lib/site-visit-properties';
 
 function isValidObjectId(id) {
   return /^[0-9a-fA-F]{24}$/.test(id);
@@ -146,6 +149,31 @@ export async function POST(request, { params }) {
     if (body.interested === '') normalizedFields.interested = null;
     else if (body.interested) normalizedFields.interested = body.interested;
 
+    let siteVisitProperties = [];
+    if (siteVisitDate) {
+      if (body.siteVisitPropertyIds !== undefined && !Array.isArray(body.siteVisitPropertyIds)) {
+        return NextResponse.json({ error: 'Site visit properties must be an array' }, { status: 400 });
+      }
+      const interestedProperty = normalizedFields.interested !== undefined
+        ? normalizedFields.interested
+        : lead.interested;
+      const requestedPropertyIds = body.siteVisitPropertyIds !== undefined
+        ? body.siteVisitPropertyIds
+        : interestedProperty
+          ? [String(interestedProperty)]
+          : [];
+      if (requestedPropertyIds.length) {
+        const propertyIds = getSiteVisitPropertyIds({ propertyIds: requestedPropertyIds });
+        if (!propertyIds) {
+          return NextResponse.json({ error: 'One or more site visit property IDs are invalid' }, { status: 400 });
+        }
+        siteVisitProperties = await findAvailableSiteVisitProperties(propertyIds);
+        if (siteVisitProperties.length !== propertyIds.length) {
+          return NextResponse.json({ error: 'One or more available site visit properties were not found' }, { status: 404 });
+        }
+      }
+    }
+
     const purpose = isLister ? 'Rent Out' : (category === 'rent_lease' ? 'Rent' : 'Buy');
     const categoryLabel = isCommercial ? 'Commercial' : 'Residential';
     const subtypeLabel = normalizedFields.propertySubType.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -175,17 +203,20 @@ export async function POST(request, { params }) {
     await lead.save();
 
     if (siteVisitDate) {
-      const property = lead.interested ? await Property.findById(lead.interested).lean() : null;
+      const property = siteVisitProperties[0] || null;
       const visitDateKey = siteVisitDate.toISOString();
       const visit = await SiteVisit.findOneAndUpdate(
         { lead: lead._id, source: 'admin', rawPreferredDateTime: visitDateKey },
         {
           $set: {
             property: property?._id || null,
+            properties: siteVisitProperties.map((item) => item._id),
             leadName: lead.name || '',
             leadPhone: lead.phone || '',
-            propertyTitle: property?.title || property?.internalName || 'Property not specified',
-            propertyCode: property?.propertyId || '',
+            propertyTitle: siteVisitProperties.length
+              ? siteVisitProperties.map((item) => item.title || item.internalName || 'Property').join(', ')
+              : 'Property not specified',
+            propertyCode: siteVisitProperties.map((item) => item.propertyId || '').filter(Boolean).join(', '),
             scheduledDate: siteVisitDate,
             scheduledTime: '',
             rawPreferredDateTime: visitDateKey,

@@ -4,6 +4,7 @@ import { useParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import ImageGalleryModal from '@/components/Properties/ImageGalleryModal';
 import TimePicker from '@/components/SiteVisits/TimePicker';
+import PropertyMultiSelect from '@/components/SiteVisits/PropertyMultiSelect';
 import { useAuth } from '@/lib/auth/useAuth';
 import {
   createLocalDateTime,
@@ -20,7 +21,8 @@ import {
 
 const TABS = [
   { id: 'enquiry', label: 'Property Enquiry', icon: Building2 },
-  { id: 'interested', label: 'Matched Property', icon: Star },
+  { id: 'interested', label: 'Interested Property', icon: Star },
+  { id: 'matched', label: 'Matched Property', icon: Star },
   { id: 'conversation', label: 'WhatsApp Conversation', icon: MessageSquare },
   { id: 'followups', label: 'Follow Ups', icon: Bell },
   { id: 'visits', label: 'Site Visits', icon: Calendar },
@@ -163,7 +165,7 @@ export default function LeadDetailPage() {
   const [propertyOptions, setPropertyOptions] = useState([]);
   const [siteVisitOpen, setSiteVisitOpen] = useState(false);
   const [savingSiteVisit, setSavingSiteVisit] = useState(false);
-  const [siteVisitForm, setSiteVisitForm] = useState({ propertyId: '', date: '', time: '', notes: '' });
+  const [siteVisitForm, setSiteVisitForm] = useState({ propertyIds: [], date: '', time: '', notes: '' });
   const [editingVisit, setEditingVisit] = useState(null);
 
   useEffect(() => {
@@ -233,6 +235,7 @@ export default function LeadDetailPage() {
         const endpointMap = {
           enquiry: `/api/leads/${lead._id}/enquiries`,
           interested: `/api/leads/${lead._id}/interests`,
+          matched: null,
           conversation: `/api/leads/${lead._id}/conversation`,
           followups: `/api/leads/${lead._id}/follow-ups`,
           visits: `/api/leads/${lead._id}/site-visits`,
@@ -240,6 +243,10 @@ export default function LeadDetailPage() {
         };
         const key = activeTab;
         const url = endpointMap[key];
+        if (!url) {
+          setSubLoading(false);
+          return;
+        }
 
         const res = await fetch(url, { cache: 'no-store' });
         const json = await res.json();
@@ -346,8 +353,8 @@ export default function LeadDetailPage() {
   const saveSiteVisit = async (event) => {
     event.preventDefault();
     const scheduledDate = createLocalDateTime(siteVisitForm.date, siteVisitForm.time);
-    if (!scheduledDate || !siteVisitForm.propertyId) {
-      toast.error('Select a valid date and time');
+    if (!scheduledDate || !siteVisitForm.propertyIds.length) {
+      toast.error('Select at least one property and a valid date and time');
       return;
     }
     setSavingSiteVisit(true);
@@ -356,7 +363,7 @@ export default function LeadDetailPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          propertyId: siteVisitForm.propertyId,
+          propertyIds: siteVisitForm.propertyIds,
           scheduledDate: scheduledDate.toISOString(),
           scheduledTime: formatSiteVisitTime(siteVisitForm.time),
           notes: siteVisitForm.notes,
@@ -369,7 +376,7 @@ export default function LeadDetailPage() {
         visits: [json.data, ...previous.visits.filter((visit) => visit._id !== json.data._id)],
       }));
       setSiteVisitOpen(false);
-      setSiteVisitForm({ propertyId: '', date: '', time: '', notes: '' });
+      setSiteVisitForm({ propertyIds: [], date: '', time: '', notes: '' });
       setActiveTab('visits');
       setLead((previous) => ({ ...previous, currentStatus: 'site_visit_scheduled' }));
       toast.success('Site visit scheduled');
@@ -384,8 +391,8 @@ export default function LeadDetailPage() {
     event.preventDefault();
     if (!editingVisit) return;
     const scheduledDate = createLocalDateTime(editingVisit.date, editingVisit.time);
-    if (!scheduledDate || !editingVisit.propertyId) {
-      toast.error('Select a valid date and time');
+    if (!scheduledDate || !editingVisit.propertyIds?.length) {
+      toast.error('Select at least one property and a valid date and time');
       return;
     }
     setSavingSiteVisit(true);
@@ -394,7 +401,7 @@ export default function LeadDetailPage() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          propertyId: editingVisit.propertyId,
+          propertyIds: editingVisit.propertyIds,
           scheduledDate: scheduledDate.toISOString(),
           scheduledTime: formatSiteVisitTime(editingVisit.time),
           status: editingVisit.status,
@@ -619,9 +626,24 @@ export default function LeadDetailPage() {
             )}
             {activeTab === 'interested' && (
               <MatchedPropertyTab
-                matchedProperties={lead.matchedProperties}
                 interests={subData.interested}
                 selectedProperty={lead.interested}
+                mode="interested"
+                onOpenGallery={(property) => {
+                  const images = Array.isArray(property.images) ? property.images : [];
+                  setSelectedGallery({
+                    images: property.imageUrl
+                      ? [property.imageUrl, ...images]
+                      : images,
+                    title: property.title || 'Property',
+                  });
+                }}
+              />
+            )}
+            {activeTab === 'matched' && (
+              <MatchedPropertyTab
+                matchedProperties={lead.matchedProperties}
+                mode="matched"
                 onOpenGallery={(property) => {
                   const images = Array.isArray(property.images) ? property.images : [];
                   setSelectedGallery({
@@ -660,7 +682,10 @@ export default function LeadDetailPage() {
                   ...visit,
                   date: localDateInput(visit.scheduledDate),
                   time: formatSiteVisitTime(visit.scheduledTime, visit.scheduledDate),
-                  propertyId: String(visit.property?._id || visit.property || ''),
+                  propertyIds: (Array.isArray(visit.properties) && visit.properties.length
+                    ? visit.properties
+                    : [visit.property].filter(Boolean))
+                    .map((property) => String(property?._id || property)),
                 })}
               />
             )}
@@ -751,6 +776,9 @@ function ManualEnquiryModal({ lead, saving, onClose, onSave }) {
       investmentType: lead.investmentType === 'Not provided' ? '' : (lead.investmentType || ''),
       siteVisitDate: preferredVisit.date,
       siteVisitTime: preferredVisit.time,
+      siteVisitPropertyIds: lead.interested
+        ? [String(typeof lead.interested === 'object' ? lead.interested._id : lead.interested)]
+        : [],
       spaceSize: lead.spaceSize || '',
       interested: typeof lead.interested === 'object' && lead.interested ? lead.interested._id : (lead.interested || ''),
     };
@@ -945,7 +973,13 @@ function ManualEnquiryModal({ lead, saving, onClose, onSave }) {
                 <input
                   type="date"
                   value={form.siteVisitDate}
-                  onChange={(event) => updateForm('siteVisitDate', event.target.value)}
+                  onChange={(event) => setForm((previous) => ({
+                    ...previous,
+                    siteVisitDate: event.target.value,
+                    siteVisitPropertyIds: previous.siteVisitPropertyIds.length
+                      ? previous.siteVisitPropertyIds
+                      : (previous.interested ? [previous.interested] : []),
+                  }))}
                   className={inputClass}
                 />
                 <TimePicker
@@ -955,9 +989,28 @@ function ManualEnquiryModal({ lead, saving, onClose, onSave }) {
               </div>
             </FormField>
           )}
+          {form.siteVisitDate && criteriaReady && (
+            <FormField label="Properties for Site Visit">
+              <PropertyMultiSelect
+                properties={properties}
+                value={form.siteVisitPropertyIds}
+                onChange={(siteVisitPropertyIds) => setForm((previous) => ({ ...previous, siteVisitPropertyIds }))}
+              />
+            </FormField>
+          )}
           {criteriaReady && (
             <FormField label="Property (optional)">
-              <select value={form.interested} onChange={(event) => updateForm('interested', event.target.value)} className={inputClass}>
+              <select
+                value={form.interested}
+                onChange={(event) => setForm((previous) => ({
+                  ...previous,
+                  interested: event.target.value,
+                  siteVisitPropertyIds: previous.siteVisitPropertyIds.length
+                    ? previous.siteVisitPropertyIds
+                    : (event.target.value ? [event.target.value] : []),
+                }))}
+                className={inputClass}
+              >
                 <option value="">Select property (optional)</option>
                 {properties.map((property) => <option key={property._id} value={property._id}>{property.propertyId || 'Property'} - {property.internalName || property.title}</option>)}
               </select>
@@ -1168,6 +1221,7 @@ function MatchedPropertyTab({
   interests,
   selectedProperty,
   onOpenGallery,
+  mode,
 }) {
   const displayedProperties = [];
   const propertyIndexes = new Map();
@@ -1193,32 +1247,34 @@ function MatchedPropertyTab({
     displayedProperties.push({ property, ...metadata });
   };
 
-  (Array.isArray(matchedProperties) ? matchedProperties : []).forEach((property) =>
-    addProperty(property, { matched: true })
-  );
+  if (mode === 'matched') {
+    (Array.isArray(matchedProperties) ? matchedProperties : []).forEach((property) =>
+      addProperty(property, { matched: true })
+    );
+  } else {
+    if (selectedProperty && typeof selectedProperty === 'object') {
+      addProperty(selectedProperty, { manuallySelected: true });
+    }
 
-  if (selectedProperty && typeof selectedProperty === 'object') {
-    addProperty(selectedProperty, { manuallySelected: true });
+    (Array.isArray(interests) ? interests : []).forEach((interest) => {
+      const property =
+        interest.property && typeof interest.property === 'object'
+          ? interest.property
+          : interest.propertySnapshot || {
+              _id: interest.property,
+              propertyId: interest.propertyCode,
+              title: interest.propertyTitle,
+            };
+      addProperty(property, {
+        expressedAt: interest.expressedAt,
+        propertySnapshot: interest.propertySnapshot,
+        propertyTitle: interest.propertyTitle,
+      });
+    });
   }
 
-  (Array.isArray(interests) ? interests : []).forEach((interest) => {
-    const property =
-      interest.property && typeof interest.property === 'object'
-        ? interest.property
-        : interest.propertySnapshot || {
-            _id: interest.property,
-            propertyId: interest.propertyCode,
-            title: interest.propertyTitle,
-          };
-    addProperty(property, {
-      expressedAt: interest.expressedAt,
-      propertySnapshot: interest.propertySnapshot,
-      propertyTitle: interest.propertyTitle,
-    });
-  });
-
   if (displayedProperties.length === 0) {
-    return <Empty icon={Star} text="No matched properties yet" />;
+    return <Empty icon={Star} text={mode === 'matched' ? 'No matched properties yet' : 'No interested properties yet'} />;
   }
 
   return (
@@ -1626,7 +1682,11 @@ function VisitsTab({ visits, onEdit }) {
               className="border-b border-[#eef5ec] hover:bg-[#fafffa] transition-colors"
             >
               <td className="px-4 py-3 text-sm text-[#1a2e1a]">
-                {v.property?.title || v.propertyTitle || '—'}
+                {(Array.isArray(v.properties) && v.properties.length
+                  ? v.properties.map((property) => property?.title || 'Property')
+                  : [v.property?.title || v.propertyTitle || '—']).map((title, index) => (
+                    <div key={`${v._id}-property-${index}`}>{title}</div>
+                  ))}
               </td>
               <td className="px-4 py-3 text-sm text-[#4f6b4f]">
                 <div>{formatDate(v.scheduledDate)}</div>
@@ -1672,20 +1732,12 @@ function SiteVisitModal({ title, form, properties, saving, editing, onChange, on
       >
         <ModalHeader title={title} onClose={onClose} />
         <div className="space-y-4 p-5">
-          <FormField label="Property">
-            <select
-              required
-              value={form.propertyId || ''}
-              onChange={(event) => onChange((previous) => ({ ...previous, propertyId: event.target.value }))}
-              className={inputClass}
-            >
-              <option value="">Select a property</option>
-              {properties.map((property) => (
-                <option key={property._id} value={property._id}>
-                  {property.title} · {property.propertyId}
-                </option>
-              ))}
-            </select>
+          <FormField label="Properties">
+            <PropertyMultiSelect
+              properties={properties}
+              value={form.propertyIds || []}
+              onChange={(propertyIds) => onChange((previous) => ({ ...previous, propertyIds }))}
+            />
           </FormField>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <FormField label="Date">

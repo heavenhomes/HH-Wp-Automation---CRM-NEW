@@ -378,9 +378,15 @@ function parseVisitDateTime(text) {
     april: 3, apr: 3, may: 4, june: 5, jun: 5, july: 6, jul: 6,
     august: 7, aug: 7, september: 8, sep: 8, sept: 8, october: 9, oct: 9,
     november: 10, nov: 10, december: 11, dec: 11,
+    जनवरी: 0, फरवरी: 1, फ़रवरी: 1, मार्च: 2, अप्रैल: 3, मई: 4, जून: 5,
+    जुलाई: 6, अगस्त: 7, सितंबर: 8, सितम्बर: 8, अक्टूबर: 9, नवंबर: 10,
+    नवम्बर: 10, दिसंबर: 11, दिसम्बर: 11,
+    જાન્યુઆરી: 0, ફેબ્રુઆરી: 1, માર્ચ: 2, એપ્રિલ: 3, મે: 4, જૂન: 5,
+    જુલાઈ: 6, જુલાઇ: 6, ઓગસ્ટ: 7, ઑગસ્ટ: 7, સપ્ટેમ્બર: 8, ઓક્ટોબર: 9,
+    નવેમ્બર: 10, ડિસેમ્બર: 11,
   };
   const monthDayYear = lower.match(
-    /(\d{1,2})\s*(?:st|nd|rd|th)?\s+([a-z]+)\s+(\d{4})/
+    /(\d{1,2})\s*(?:st|nd|rd|th)?\s+([\p{L}\p{M}]+)\s+(\d{4})/u
   );
   if (monthDayYear) {
     const day = parseInt(monthDayYear[1], 10);
@@ -392,7 +398,7 @@ function parseVisitDateTime(text) {
   }
 
   if (!date) {
-    const monthDay = lower.match(/(\d{1,2})\s*(?:st|nd|rd|th)?\s+([a-z]+)/);
+    const monthDay = lower.match(/(\d{1,2})\s*(?:st|nd|rd|th)?\s+([\p{L}\p{M}]+)/u);
     if (monthDay) {
       const day = parseInt(monthDay[1], 10);
       const monthKey = monthDay[2].toLowerCase();
@@ -400,7 +406,9 @@ function parseVisitDateTime(text) {
         const now = new Date();
         let year = now.getFullYear();
         const candidate = new Date(year, monthNames[monthKey], day);
-        if (candidate < now) year += 1;
+        const candidateDay = new Date(candidate.getFullYear(), candidate.getMonth(), candidate.getDate());
+        const currentDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        if (candidateDay < currentDay) year += 1;
         date = new Date(year, monthNames[monthKey], day);
       }
     }
@@ -465,6 +473,25 @@ function parseVisitDateTime(text) {
   }
 
   return { date, time, raw };
+}
+
+function isPastSiteVisitDate(date) {
+  const parsedDate = new Date(date);
+  if (!Number.isFinite(parsedDate.getTime())) return false;
+  const today = new Date();
+  return new Date(
+    parsedDate.getFullYear(),
+    parsedDate.getMonth(),
+    parsedDate.getDate()
+  ) < new Date(today.getFullYear(), today.getMonth(), today.getDate());
+}
+
+function pastSiteVisitDateMessage(lang) {
+  return t(lang, {
+    en: 'This date has already passed. Please enter a future date and time for your site visit.',
+    hi: 'यह तारीख पहले ही बीत चुकी है। कृपया साइट विज़िट के लिए भविष्य की तारीख और समय दर्ज करें।',
+    gu: 'આ તારીખ પસાર થઈ ગઈ છે. કૃપા કરીને સાઇટ વિઝિટ માટે ભવિષ્યની તારીખ અને સમય દાખલ કરો.',
+  });
 }
 
 function bucketRentAmount(amount) {
@@ -1710,11 +1737,22 @@ const STEPS = {
   askVisitDateTime: {
     kind: 'text',
     prompt: {
-      en: 'Excellent choice! 🏡\nPlease share your preferred date and time for the site visit.\n📅 Example: 28 July 2026, 🕒 11:00 AM',
-      hi: 'बढ़िया चुनाव! 🏡\nकृपया साइट विजिट के लिए अपनी पसंदीदा तारीख और समय बताएं।\n📅 उदाहरण: 28 जुलाई 2026, 🕒 11:00 AM',
-      gu: 'ઉત્તમ પસંદગી! 🏡\nકૃપા કરી સાઇટ વિઝિટ માટે તમારી પસંદગીની તારીખ અને સમય જણાવો.\n📅 ઉદાહરણ: 28 જુલાઈ 2026, 🕒 11:00 AM',
+      en: 'Excellent choice! 🏡\nPlease share your preferred date and time for the site visit.\n📅 Example: 28 December 2026, 🕒 11:00 AM',
+      hi: 'बढ़िया चुनाव! 🏡\nकृपया साइट विजिट के लिए अपनी पसंदीदा तारीख और समय बताएं।\n📅 उदाहरण: 28 दिसंबर 2026, 🕒 11:00 AM',
+      gu: 'ઉત્તમ પસંદગી! 🏡\nકૃપા કરી સાઇટ વિઝિટ માટે તમારી પસંદગીની તારીખ અને સમય જણાવો.\n📅 ઉદાહરણ: 28 ડિસેમ્બર 2026, 🕒 11:00 AM',
     },
-    validate: (v) => v.trim().length >= 4,
+    validate: (value) =>
+      value.trim().length >= 4 &&
+      !isPastSiteVisitDate(parseVisitDateTime(value).date),
+    onInvalid: (lead, lang, value) => ({
+      text: isPastSiteVisitDate(parseVisitDateTime(value).date)
+        ? pastSiteVisitDateMessage(lang)
+        : t(lang, {
+            en: 'Please enter a valid date and time for your site visit.',
+            hi: 'कृपया साइट विज़िट के लिए सही तारीख और समय दर्ज करें।',
+            gu: 'કૃપા કરીને સાઇટ વિઝિટ માટે સાચી તારીખ અને સમય દાખલ કરો.',
+          }),
+    }),
     apply: async (lead, value) => {
       const rawText = value.trim();
       lead.siteVisit = rawText;
@@ -2420,7 +2458,7 @@ async function handleMessage(phone, incoming, appUrl) {
     if (action === 'reschedule') {
       lead.activeSiteVisit = visit._id;
       lead.step = 'rescheduleSiteVisit';
-      const message = `🔄 Reschedule Your Site Visit\n\nNo problem, ${customerName}! 😊\n📅 Please enter your preferred new date and time for the site visit.\nExample: 15 October 2026, 4:00 PM`;
+      const message = `🔄 Reschedule Your Site Visit\n\nNo problem, ${customerName}! 😊\n📅 Please enter your preferred new date and time for the site visit.\nExample: 15 December 2026, 4:00 PM`;
       pushConversation(lead, { direction: 'out', type: 'text', text: message });
       await lead.save();
       await sendText(phone, message);
@@ -2453,7 +2491,7 @@ async function handleMessage(phone, incoming, appUrl) {
   }
 
   if (lead.step === 'rescheduleSiteVisit') {
-    const datePattern = /\b\d{1,2}\s*(?:st|nd|rd|th)?\s+[a-z]+\b|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b|\b(?:today|tomorrow|day after tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i;
+    const datePattern = /\d{1,2}\s*(?:st|nd|rd|th)?\s+[\p{L}\p{M}]+|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b|\b(?:today|tomorrow|day after tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/iu;
     const timePattern = /\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b\d{1,2}:\d{2}\b/i;
     if (!datePattern.test(text) || !timePattern.test(text)) {
       const message = 'Please enter both a date and time. Example: 15 October 2026, 4:00 PM';
@@ -2479,6 +2517,13 @@ async function handleMessage(phone, incoming, appUrl) {
     }
 
     const parsed = parseVisitDateTime(text);
+    if (isPastSiteVisitDate(parsed.date)) {
+      const message = pastSiteVisitDateMessage(lang);
+      pushConversation(lead, { direction: 'out', type: 'text', text: message });
+      await lead.save();
+      await sendText(phone, message);
+      return;
+    }
     visit.rescheduledFrom = {
       date: visit.scheduledDate,
       time: visit.scheduledTime,
@@ -2638,7 +2683,7 @@ async function handleMessage(phone, incoming, appUrl) {
 
     if (!isValid) {
       if (step.onInvalid) {
-        const result = await step.onInvalid(lead, lang);
+        const result = await step.onInvalid(lead, lang, text);
         await lead.save();
 
         if (result.redirectTo) {

@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import TimePicker from '@/components/SiteVisits/TimePicker';
+import PropertyMultiSelect from '@/components/SiteVisits/PropertyMultiSelect';
 import { createLocalDateTime } from '@/lib/site-visit-time';
 import { normalizePhoneNumber } from '@/lib/phone-number';
 import { FaWhatsapp } from 'react-icons/fa';
@@ -227,6 +228,7 @@ export default function LeadsPage() {
     investmentType: "",
     siteVisitDate: "",
     siteVisitTime: "",
+    siteVisitPropertyIds: [],
     interested: "",
     spaceSize: "",
     currentStatus: "new",
@@ -551,6 +553,7 @@ export default function LeadsPage() {
       investmentType: "",
       siteVisitDate: "",
       siteVisitTime: "",
+      siteVisitPropertyIds: [],
       interested: "",
       spaceSize: "",
       currentStatus: "new",
@@ -1375,7 +1378,13 @@ export default function LeadsPage() {
                     <input
                       type="date"
                       value={form.siteVisitDate}
-                      onChange={(e) => setForm((p) => ({ ...p, siteVisitDate: e.target.value }))}
+                      onChange={(e) => setForm((p) => ({
+                        ...p,
+                        siteVisitDate: e.target.value,
+                        siteVisitPropertyIds: p.siteVisitPropertyIds.length
+                          ? p.siteVisitPropertyIds
+                          : (p.interested ? [p.interested] : []),
+                      }))}
                       className="w-full px-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a]"
                     />
                     <TimePicker
@@ -1384,6 +1393,16 @@ export default function LeadsPage() {
                     />
                   </div>
                 </Field>
+                )}
+                {form.siteVisitDate && propertyCriteriaReady && (
+                  <Field label="Properties for Site Visit">
+                    <PropertyMultiSelect
+                      properties={matchingProperties}
+                      value={form.siteVisitPropertyIds}
+                      onChange={(siteVisitPropertyIds) => setForm((p) => ({ ...p, siteVisitPropertyIds }))}
+                      disabled={propertiesLoading}
+                    />
+                  </Field>
                 )}
                 {isOwner ? (
                   <Field label="Assigned To">
@@ -1427,7 +1446,13 @@ export default function LeadsPage() {
                 <Field label="Property (optional)">
                   <select
                     value={form.interested}
-                    onChange={(e) => setForm((p) => ({ ...p, interested: e.target.value }))}
+                    onChange={(e) => setForm((p) => ({
+                      ...p,
+                      interested: e.target.value,
+                      siteVisitPropertyIds: p.siteVisitPropertyIds.length
+                        ? p.siteVisitPropertyIds
+                        : (e.target.value ? [e.target.value] : []),
+                    }))}
                     disabled={propertiesLoading}
                     className="w-full px-3 py-2 border border-[#e8f0e6] rounded-xl text-sm bg-[#fafffa] focus:outline-none focus:ring-2 focus:ring-[#2d7a3a]/20 focus:border-[#2d7a3a] disabled:bg-gray-100"
                   >
