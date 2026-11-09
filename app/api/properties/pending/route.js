@@ -16,7 +16,11 @@ export async function GET(request) {
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '20', 10)));
     const skip = (page - 1) * limit;
 
-    const query = { status: 'pending' };
+    const channelPartnerIds = await TeamMember.find({ role: 'channel_partner' }).distinct('_id');
+    const query = {
+      status: 'pending',
+      uploadedBy: { $in: channelPartnerIds },
+    };
 
     const [properties, total] = await Promise.all([
       Property.find(query)

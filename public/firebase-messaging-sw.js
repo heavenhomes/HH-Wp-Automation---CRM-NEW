@@ -15,12 +15,12 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage((payload) => {
-  const title = payload.notification?.title || 'New Notification';
+  const title = payload.data?.title || payload.notification?.title || 'New Notification';
   const options = {
-    body: payload.notification?.body || '',
+    body: payload.data?.body || payload.notification?.body || '',
     icon: '/logo-heaven.png',
     badge: '/logo-heaven.png',
-    data: { url: payload.fcmOptions?.link || payload.data?.url || '/' },
+    data: { url: payload.data?.url || payload.fcmOptions?.link || '/' },
   };
   self.registration.showNotification(title, options);
 });

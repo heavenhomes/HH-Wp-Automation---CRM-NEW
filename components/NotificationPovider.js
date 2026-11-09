@@ -27,8 +27,10 @@ export default function NotificationProvider({ children }) {
       notificationSound.play().catch((error) => {
         console.warn('[notification sound] Playback failed:', error);
       });
+      const title = payload.notification?.title || payload.data?.title || '';
+      const body = payload.notification?.body || payload.data?.body || '';
       toast(
-        `${payload.notification?.title || ''}\n${payload.notification?.body || ''}`,
+        `${title}\n${body}`,
         { icon: '🔔', duration: 6000 }
       );
     });

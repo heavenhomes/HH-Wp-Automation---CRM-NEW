@@ -20,7 +20,7 @@ import {
 
 const TABS = [
   { id: 'enquiry', label: 'Property Enquiry', icon: Building2 },
-  { id: 'interested', label: 'Interested Property', icon: Star },
+  { id: 'interested', label: 'Matched Property', icon: Star },
   { id: 'conversation', label: 'WhatsApp Conversation', icon: MessageSquare },
   { id: 'followups', label: 'Follow Ups', icon: Bell },
   { id: 'visits', label: 'Site Visits', icon: Calendar },
@@ -618,7 +618,8 @@ export default function LeadDetailPage() {
               <EnquiryTab enquiries={subData.enquiry} />
             )}
             {activeTab === 'interested' && (
-              <InterestedTab
+              <MatchedPropertyTab
+                matchedProperties={lead.matchedProperties}
                 interests={subData.interested}
                 selectedProperty={lead.interested}
                 onOpenGallery={(property) => {
@@ -1162,48 +1163,82 @@ function EnquiryTab({ enquiries }) {
   );
 }
 
-function InterestedTab({ interests, selectedProperty, onOpenGallery }) {
-  const list = Array.isArray(interests) ? interests : [];
-  const selectedPropertyId =
-    typeof selectedProperty === 'object' && selectedProperty !== null
-      ? selectedProperty._id
-      : selectedProperty;
-  const hasSelectedProperty = selectedProperty &&
-    !list.some((interest) => {
-      const propertyId =
-        typeof interest.property === 'object' && interest.property !== null
-          ? interest.property._id
-          : interest.property;
-      return String(propertyId) === String(selectedPropertyId);
+function MatchedPropertyTab({
+  matchedProperties,
+  interests,
+  selectedProperty,
+  onOpenGallery,
+}) {
+  const displayedProperties = [];
+  const propertyIndexes = new Map();
+
+  const addProperty = (property, metadata = {}) => {
+    if (!property || typeof property !== 'object') return;
+
+    const key = String(
+      property._id ||
+      property.propertyId ||
+      `${property.title || 'property'}-${property.city || ''}-${property.area || ''}`
+    );
+    const existingIndex = propertyIndexes.get(key);
+    if (existingIndex !== undefined) {
+      displayedProperties[existingIndex] = {
+        ...displayedProperties[existingIndex],
+        ...metadata,
+      };
+      return;
+    }
+
+    propertyIndexes.set(key, displayedProperties.length);
+    displayedProperties.push({ property, ...metadata });
+  };
+
+  (Array.isArray(matchedProperties) ? matchedProperties : []).forEach((property) =>
+    addProperty(property, { matched: true })
+  );
+
+  if (selectedProperty && typeof selectedProperty === 'object') {
+    addProperty(selectedProperty, { manuallySelected: true });
+  }
+
+  (Array.isArray(interests) ? interests : []).forEach((interest) => {
+    const property =
+      interest.property && typeof interest.property === 'object'
+        ? interest.property
+        : interest.propertySnapshot || {
+            _id: interest.property,
+            propertyId: interest.propertyCode,
+            title: interest.propertyTitle,
+          };
+    addProperty(property, {
+      expressedAt: interest.expressedAt,
+      propertySnapshot: interest.propertySnapshot,
+      propertyTitle: interest.propertyTitle,
     });
-  const displayedInterests = hasSelectedProperty
-    ? [{ _id: `selected-${selectedPropertyId}`, property: selectedProperty, manuallySelected: true }, ...list]
-    : list;
-  if (displayedInterests.length === 0) {
-    return <Empty icon={Star} text="No interested properties yet" />;
+  });
+
+  if (displayedProperties.length === 0) {
+    return <Empty icon={Star} text="No matched properties yet" />;
   }
 
   return (
     <div className="space-y-3">
-      {displayedInterests.map((it, idx) => {
-        const p =
-          typeof it.property === 'object' && it.property !== null
-            ? it.property
-            : null;
-        const publicTitle = p?.title || it.propertyTitle || 'Property';
-        const propertyId = p?.propertyId || it.propertySnapshot?.propertyId || '';
+      {displayedProperties.map((it, idx) => {
+        const p = it.property;
+        const publicTitle = p.title || it.propertyTitle || 'Property';
+        const propertyId = p.propertyId || it.propertySnapshot?.propertyId || '';
         const internalName =
-          p?.internalName || it.propertySnapshot?.internalName || '';
-        const city = p?.city || it.propertySnapshot?.city || '';
-        const area = p?.area || it.propertySnapshot?.area || '';
-        const price = p?.price || it.propertySnapshot?.price || 0;
-        const image = p?.imageUrl || it.propertySnapshot?.imageUrl || null;
-        const images = p?.images || it.propertySnapshot?.images || [];
+          p.internalName || it.propertySnapshot?.internalName || '';
+        const city = p.city || it.propertySnapshot?.city || '';
+        const area = p.area || it.propertySnapshot?.area || '';
+        const price = p.price || it.propertySnapshot?.price || 0;
+        const image = p.imageUrl || it.propertySnapshot?.imageUrl || null;
+        const images = p.images || it.propertySnapshot?.images || [];
         const galleryImages = image ? [image, ...images] : images;
 
         return (
           <div
-            key={it._id || `int-${idx}`}
+            key={p._id || p.propertyId || `matched-${idx}`}
             className="min-w-0 overflow-hidden bg-white shadow-sm md:bg-transparent md:shadow-none border border-[#eef5ec] rounded-xl p-3 flex flex-col md:flex-row md:items-center gap-3 hover:bg-[#fafffa] transition-colors"
           >
             {image ? (
@@ -1267,16 +1302,18 @@ function InterestedTab({ interests, selectedProperty, onOpenGallery }) {
                 {area}
               </p>
               <p className="text-xs text-[#6a7f6a] mt-1">
-                {it.manuallySelected
-                  ? 'Selected for this lead'
-                  : <>Expressed interest on{' '}
-                {it.expressedAt
-                  ? new Date(it.expressedAt).toLocaleDateString('en-IN', {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })
-                  : '—'}</>}
+                {it.matched
+                  ? 'Matched property'
+                  : it.manuallySelected
+                    ? 'Selected for this lead'
+                    : <>Expressed interest on{' '}
+                      {it.expressedAt
+                        ? new Date(it.expressedAt).toLocaleDateString('en-IN', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })
+                        : '—'}</>}
               </p>
             </div>
 

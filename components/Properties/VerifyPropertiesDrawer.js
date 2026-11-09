@@ -180,7 +180,7 @@ export default function VerifyPropertiesDrawer({ isOpen, onClose, onChanged }) {
                 Property Verification
               </h2>
               <p className="text-xs text-[#6a7f6a] truncate">
-                Review properties submitted by channel partners & WhatsApp users
+                Review properties submitted by channel partners
               </p>
             </div>
           </div>

@@ -99,6 +99,6 @@ export const config = {
     // NOTE: `js` is intentionally not excluded — Next 16 compiles dynamic API
     // routes through a `.js`-suffixed internal path, and excluding `js` here
     // causes those routes to 404 because the proxy never runs on them.
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|css|map|woff2?|txt)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|css|map|woff2?|txt|mp3)$).*)',
   ],
 };
