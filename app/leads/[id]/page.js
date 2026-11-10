@@ -20,9 +20,9 @@ import {
 } from 'lucide-react';
 
 const TABS = [
-  { id: 'enquiry', label: 'Property Enquiry', icon: Building2 },
-  { id: 'interested', label: 'Interested Property', icon: Star },
-  { id: 'matched', label: 'Matched Property', icon: Star },
+  { id: 'enquiry', label: 'Enquiries', icon: Building2 },
+  { id: 'interested', label: 'Interested', icon: Star },
+  { id: 'matched', label: 'Matched', icon: Star },
   { id: 'conversation', label: 'WhatsApp Conversation', icon: MessageSquare },
   { id: 'followups', label: 'Follow Ups', icon: Bell },
   { id: 'visits', label: 'Site Visits', icon: Calendar },
