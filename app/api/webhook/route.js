@@ -1064,11 +1064,11 @@ const STEPS = {
 
   askPhone: {
     kind: 'text',
-    prompt: {
+    prompt: (lead) => ({
       en: ' To help you better and keep you updated about suitable properties,📱 Please enter your alternate contact number.',
-      hi: ' धन्यवाद, राहुल! 😊 आपकी बहतर सहायता करन और आपको उपयक्त प्रॉपर्टी की जानकारी दत रहन क लिए, 📱 कपया अपना वकल्पिक सप नबर द कर',
-      gu: 'આભાર, રાહલ! 😊 તમન વધ સારી રીત મદદ કરવા અન યોગ્ય પ્રોપર્ટીની મા હિતી આપતા રહવા માટ, 📱 કપા કરીન તમારો વક લ્પિક સપ નબર દાખલ કરો.',
-    },
+      hi: `धन्यवाद, ${lead.name?.trim() || 'मित्र'}! 😊 बेहतर सहायता और उपयुक्त प्रॉपर्टी की जानकारी देने के लिए, कृपया अपना वैकल्पिक संपर्क नंबर दर्ज करें।`,
+      gu: `આભાર, ${lead.name?.trim() || 'મિત્ર'}! 😊 તમને વધુ સારી રીતે મદદ કરવા અને યોગ્ય પ્રોપર્ટીની માહિતી આપવા માટે, કૃપા કરીને તમારો વૈકલ્પિક સંપર્ક નંબર દાખલ કરો.`,
+    }),
     validate: (v) => /^[+]?[\d\s-]{7,15}$/.test(v.trim()),
     apply: async (lead, value) => {
       lead.phoneNumber = value.trim();
@@ -2433,7 +2433,11 @@ async function handleMessage(phone, incoming, appUrl) {
       return;
     }
 
-    const visitDate = visit.scheduledDate.toLocaleDateString('en-GB', {
+    const lang = ['en', 'hi', 'gu'].includes(lead.preferredLanguage)
+      ? lead.preferredLanguage
+      : 'en';
+    const dateLocale = { en: 'en-GB', hi: 'hi-IN', gu: 'gu-IN' }[lang];
+    const visitDate = visit.scheduledDate.toLocaleDateString(dateLocale, {
       day: 'numeric',
       month: 'long',
       year: 'numeric',
@@ -2445,10 +2449,16 @@ async function handleMessage(phone, incoming, appUrl) {
       hour12: true,
       timeZone: 'Asia/Kolkata',
     });
-    const customerName = lead.name?.trim() || 'there';
+    const customerName = lead.name?.trim() || (
+      lang === 'hi' ? 'मित्र' : lang === 'gu' ? 'મિત્ર' : 'there'
+    );
 
     if (action === 'confirm') {
-      const message = `✅ Site Visit Confirmed!\n\nThank you, ${customerName}! 😊 Your site visit has been confirmed successfully. 🏡\n\n🏡 Property: ${visit.propertyTitle}\n📅 Date: ${visitDate}\n⏰ Time: ${visitTime}\n\nWe look forward to seeing you! 🏡`;
+      const message = t(lang, {
+        en: `✅ Site Visit Confirmed!\n\nThank you, ${customerName}! 😊 Your site visit has been confirmed successfully. 🏡\n\n🏡 Property: ${visit.propertyTitle}\n📅 Date: ${visitDate}\n⏰ Time: ${visitTime}\n\nWe look forward to seeing you! 🏡`,
+        hi: `✅ साइट विज़िट की पुष्टि हो गई है!\n\nधन्यवाद, ${customerName}! 😊 आपकी साइट विज़िट सफलतापूर्वक कन्फर्म हो गई है। 🏡\n\n🏡 प्रॉपर्टी: ${visit.propertyTitle}\n📅 तारीख: ${visitDate}\n⏰ समय: ${visitTime}\n\nहम आपसे मिलने के लिए उत्सुक हैं! 🏡`,
+        gu: `✅ સાઇટ વિઝિટની પુષ્ટિ થઈ ગઈ છે!\n\nઆભાર, ${customerName}! 😊 તમારી સાઇટ વિઝિટ સફળતાપૂર્વક કન્ફર્મ થઈ ગઈ છે. 🏡\n\n🏡 પ્રોપર્ટી: ${visit.propertyTitle}\n📅 તારીખ: ${visitDate}\n⏰ સમય: ${visitTime}\n\nઅમે તમને મળવા આતુર છીએ! 🏡`,
+      });
       pushConversation(lead, { direction: 'out', type: 'text', text: message });
       await lead.save();
       await sendText(phone, message);
@@ -2712,7 +2722,8 @@ async function handleMessage(phone, incoming, appUrl) {
         return;
       }
 
-      const errMsg = t(lang, ERROR_PREFIX) + t(lang, step.prompt);
+      const promptTri = typeof step.prompt === 'function' ? step.prompt(lead) : step.prompt;
+      const errMsg = t(lang, ERROR_PREFIX) + t(lang, promptTri);
       pushConversation(lead, { direction: 'out', type: 'text', text: errMsg });
       await lead.save();
       await sendText(phone, errMsg);
